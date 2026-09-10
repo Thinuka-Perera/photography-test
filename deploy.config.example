@@ -1,0 +1,7 @@
+SUBDOMAIN="ru.pos2.possystem.lk"
+DB_NAME="pos2app_ru_db"
+DB_USER="pos2app_ru_user"
+DB_PASS="applantics@123"
+GH_TOKEN="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"
+REPO="https://github.com/APPLANTICS/photograpy-pos-.git"
+BRANCH="resins-photo-frames-pos"

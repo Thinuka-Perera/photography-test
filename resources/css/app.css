@@ -1,0 +1,67 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/*
+ * Theme switching: color transitions are disabled in ThemeContext.jsx
+ * during toggle. Do not add global * { transition: background-color ... }
+ * rules here — they cause visible lag when toggling light/dark.
+ */
+
+/* ─────────────────────────────────────────────
+   Hide the up/down spinner arrows on ALL number inputs globally.
+   This gives a clean text-box feel for price and quantity fields.
+   Works across Chrome, Safari (webkit) and Firefox (moz).
+───────────────────────────────────────────── */
+input[type="number"]::-webkit-outer-spin-button,
+input[type="number"]::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+}
+
+input[type="number"] {
+    -moz-appearance: textfield;
+}
+
+/* ─────────────────────────────────────────────
+   Toast notification animations
+   animate-shrink: progress bar that shrinks from 100% to 0% over the toast lifetime
+   animate-in / slide-in-from-right-5: entrance slide from the right
+───────────────────────────────────────────── */
+@keyframes shrink {
+    from { width: 100%; }
+    to   { width: 0%; }
+}
+
+@keyframes slideInFromRight {
+    from { transform: translateX(20px); opacity: 0; }
+    to   { transform: translateX(0);   opacity: 1; }
+}
+
+.animate-shrink {
+    animation: shrink linear forwards;
+}
+
+.animate-in {
+    animation: slideInFromRight 0.3s ease-out forwards;
+}
+
+/* ─────────────────────────────────────────────
+   Hide native scrollbar while preserving scroll behaviour.
+   Used by the app sidebar (and any other slim chrome surfaces) where the
+   browser scrollbar would visually clutter a narrow column. Add this class
+   alongside `overflow-y-auto` to keep the wheel/touch scroll active.
+
+   Cross-browser:
+     - Firefox          → scrollbar-width: none
+     - IE / legacy Edge → -ms-overflow-style: none
+     - Chrome / Safari  → ::-webkit-scrollbar { display: none }
+───────────────────────────────────────────── */
+.scrollbar-none {
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+}
+
+.scrollbar-none::-webkit-scrollbar {
+    display: none;
+}

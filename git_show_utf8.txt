@@ -1,0 +1,1830 @@
+﻿commit 28b6c8400800b2e8d5fbd3b4a08514dde050658c
+Author: Thinuka-Perera <thinukapereraa@gmail.com>
+Date:   Fri Aug 14 12:31:02 2026 +0530
+
+    Implement the Dealer Assignment in pos and that commision calculate in the salaries page
+
+diff --git a/app/Http/Controllers/EmployeeController.php b/app/Http/Controllers/EmployeeController.php
+index b65abb2..ea44367 100644
+--- a/app/Http/Controllers/EmployeeController.php
++++ b/app/Http/Controllers/EmployeeController.php
+@@ -199,29 +199,41 @@ class EmployeeController extends Controller
+             'overtime_rate' => ['nullable', 'numeric', 'min:0'],
+         ]);
+ 
+-        // Fix commission for non-editors
+-        if (($validated['role'] ?? null) !== 'editor') {
++        // Fix commission for non-editors and non-dealers
++        $roleSlug = $validated['role'] ?? '';
++        $isCommissionable = $roleSlug === 'editor' || str_contains($roleSlug, 'dealer');
++        
++        if (!$isCommissionable) {
+             $validated['default_commission_pct'] = 0;
+         }
+ 
+-        // If editor but empty ΓåÆ default 5%
+-        if (($validated['role'] ?? null) === 'editor' && empty($validated['default_commission_pct'])) {
+-            $validated['default_commission_pct'] = 5;
++        // If empty ΓåÆ assign defaults (5% for editors, 0 for others)
++        if (empty($validated['default_commission_pct'])) {
++            if ($roleSlug === 'editor') {
++                $validated['default_commission_pct'] = 5;
++            } else {
++                $validated['default_commission_pct'] = 0;
++            }
+         }
+ 
+-        // Sync job_role to role so POS queries work correctly
+-        $validated['job_role'] = $validated['role'] ?? null;
++        // Sync job_role to role if it is a valid legacy enum value, otherwise fallback to default
++        $legacyEnumValues = ['front_office', 'editor', 'trainee'];
++        if (in_array($roleSlug, $legacyEnumValues, true)) {
++            $validated['job_role'] = $roleSlug;
++        } else {
++            $validated['job_role'] = 'front_office';
++        }
+ 
+-        if (empty($validated['birthday'])) {
++        if (!isset($validated['birthday']) || $validated['birthday'] === '') {
+             $validated['birthday'] = null;
+         }
+ 
+-        if (empty($validated['basic_salary'])) {
+-            $validated['basic_salary'] = null;
++        if (!isset($validated['basic_salary']) || $validated['basic_salary'] === '') {
++            $validated['basic_salary'] = 0;
+         }
+ 
+-        if (empty($validated['overtime_rate'])) {
+-            $validated['overtime_rate'] = null;
++        if (!isset($validated['overtime_rate']) || $validated['overtime_rate'] === '') {
++            $validated['overtime_rate'] = 0;
+         }
+ 
+         return $validated;
+diff --git a/app/Http/Controllers/Studio/BillController.php b/app/Http/Controllers/Studio/BillController.php
+index 862a3d7..1a36be5 100644
+--- a/app/Http/Controllers/Studio/BillController.php
++++ b/app/Http/Controllers/Studio/BillController.php
+@@ -47,7 +47,12 @@ class BillController extends Controller
+             $query->byEditor($request->get('editor_id'));
+         }
+ 
+-        $bills = $query->with(['createdBy', 'editor', 'commission'])
++        // Filter by dealer
++        if ($request->get('dealer_id')) {
++            $query->where('dealer_id', $request->get('dealer_id'));
++        }
++
++        $bills = $query->with(['createdBy', 'editor', 'commission', 'dealer', 'dealerCommission'])
+             ->latest('created_at')
+             ->paginate(20);
+ 
+@@ -57,10 +62,17 @@ class BillController extends Controller
+             ->orderBy('name', 'asc')
+             ->get(['id', 'name']);
+ 
++        $dealers = Employee::query()
++            ->forShop($activeShop->id)
++            ->dealers()
++            ->orderBy('name', 'asc')
++            ->get(['id', 'name']);
++
+         return Inertia::render('Studio/Bills/Index', [
+             'bills' => $bills,
+-            'filters' => $request->only(['status', 'from_date', 'to_date', 'editor_id']),
++            'filters' => $request->only(['status', 'from_date', 'to_date', 'editor_id', 'dealer_id']),
+             'editors' => $editors,
++            'dealers' => $dealers,
+         ]);
+     }
+ 
+@@ -79,6 +91,11 @@ class BillController extends Controller
+                 ->editors()
+                 ->orderBy('name', 'asc')
+                 ->get(['id', 'name', 'default_commission_pct']),
++            'dealers' => Employee::query()
++                ->forShop($activeShop->id)
++                ->dealers()
++                ->orderBy('name', 'asc')
++                ->get(['id', 'name', 'default_commission_pct']),
+         ]);
+     }
+ 
+@@ -101,6 +118,9 @@ class BillController extends Controller
+             'editor_id' => 'nullable|exists:employees,id',
+             'commission_pct' => 'nullable|numeric|min:0|max:100',
+             'is_commission_applicable' => 'boolean',
++            'dealer_id' => 'nullable|exists:employees,id',
++            'dealer_commission_pct' => 'nullable|numeric|min:0|max:100',
++            'is_dealer_commission_applicable' => 'boolean',
+             'payment_method' => 'required|string|in:cash,card,bank_transfer,credit,advance',
+             'customer_id' => 'nullable|exists:customers,id',
+             'customer_name' => 'required_if:payment_method,credit,advance|nullable|string|max:255',
+@@ -128,6 +148,14 @@ class BillController extends Controller
+                         ->value('default_commission_pct');
+                 }
+ 
++                $dealerCommissionPct = null;
++                if (! empty($validated['dealer_id'])) {
++                    $dealerCommissionPct = Employee::query()
++                        ->forShop(app(Shop::class)->id)
++                        ->whereKey($validated['dealer_id'])
++                        ->value('default_commission_pct');
++                }
++
+                 $status = 'processing';
+                 $isPosCommit = $request->routeIs('studio.pos.commit') || $request->header('X-POS-Commit') === '1';
+                 if ($isPosCommit && in_array($validated['payment_method'], ['cash', 'card', 'bank_transfer'], true)) {
+@@ -163,6 +191,13 @@ class BillController extends Controller
+                         ? ($validated['commission_pct'] ?? $editorCommissionPct)
+                         : $editorCommissionPct,
+                     'is_commission_applicable' => $validated['is_commission_applicable'] ?? true,
++
++                    'dealer_id' => $validated['dealer_id'] ?? null,
++                    'dealer_commission_pct' => $request->user()?->hasAnyRole(['admin', 'super_admin'])
++                        ? ($validated['dealer_commission_pct'] ?? $dealerCommissionPct)
++                        : $dealerCommissionPct,
++                    'is_dealer_commission_applicable' => $validated['is_dealer_commission_applicable'] ?? true,
++
+                     'payment_method' => $validated['payment_method'],
+                     'customer_id' => $validated['customer_id'] ?? null,
+                     'customer_name' => $validated['customer_name'] ?? null,
+@@ -262,6 +297,15 @@ class BillController extends Controller
+                             'confirmed_at' => now(),
+                         ]);
+                     }
++
++                    // Immediately mark dealer commission as paid and add to salary ledger
++                    $bill->loadMissing(['dealerCommission']);
++                    if ($bill->dealerCommission && !$bill->dealerCommission->is_paid && (float) $bill->dealerCommission->commission_amt > 0) {
++                        $this->billService->markDealerCommissionPaid(
++                            $bill->dealerCommission,
++                            (int) ($request->user()?->getAuthIdentifier() ?? 0)
++                        );
++                    }
+                 }
+ 
+                 // If the new bill reclaims an advance, settle the original advance CreditBill
+@@ -420,7 +464,7 @@ class BillController extends Controller
+         $activeShop = app(Shop::class);
+ 
+         return Inertia::render('Studio/Bills/Edit', [
+-            'bill' => $bill->load(['items']),
++            'bill' => $bill->load(['items', 'dealerCommission']),
+             'itemTypes' => BillCategory::query()->where('is_active', true)->get(['id', 'name', 'default_description', 'no_commission']),
+             'categories' => BillCategory::query()->where('is_active', true)->get(['id', 'name', 'default_description', 'no_commission']),
+             'editors' => Employee::query()
+@@ -428,6 +472,11 @@ class BillController extends Controller
+                 ->editors()
+                 ->orderBy('name', 'asc')
+                 ->get(['id', 'name', 'default_commission_pct']),
++            'dealers' => Employee::query()
++                ->forShop($activeShop->id)
++                ->dealers()
++                ->orderBy('name', 'asc')
++                ->get(['id', 'name', 'default_commission_pct']),
+         ]);
+     }
+ 
+@@ -455,6 +504,9 @@ class BillController extends Controller
+             'editor_id' => 'nullable|exists:employees,id',
+             'commission_pct' => 'nullable|numeric|min:0|max:100',
+             'is_commission_applicable' => 'boolean',
++            'dealer_id' => 'nullable|exists:employees,id',
++            'dealer_commission_pct' => 'nullable|numeric|min:0|max:100',
++            'is_dealer_commission_applicable' => 'boolean',
+             'notes' => 'nullable|string',
+         ]);
+ 
+@@ -465,6 +517,9 @@ class BillController extends Controller
+                     'editor_id' => $validated['editor_id'] ?? $bill->editor_id,
+                     'commission_pct' => $validated['commission_pct'] ?? $bill->commission_pct,
+                     'is_commission_applicable' => $validated['is_commission_applicable'] ?? $bill->is_commission_applicable,
++                    'dealer_id' => array_key_exists('dealer_id', $validated) ? $validated['dealer_id'] : $bill->dealer_id,
++                    'dealer_commission_pct' => array_key_exists('dealer_commission_pct', $validated) ? $validated['dealer_commission_pct'] : $bill->dealer_commission_pct,
++                    'is_dealer_commission_applicable' => array_key_exists('is_dealer_commission_applicable', $validated) ? (bool) $validated['is_dealer_commission_applicable'] : $bill->is_dealer_commission_applicable,
+                     'discount_amount' => $validated['discount_amount'] ?? $bill->discount_amount,
+                     'notes' => $validated['notes'] ?? $bill->notes,
+                 ]);
+@@ -550,6 +605,48 @@ class BillController extends Controller
+                         'creation_charge_amt' => (float) ($bill->creation_charge ?? 0),
+                     ]);
+                 }
++
++                // Update dealer commission if exists/create/delete
++                $bill->loadMissing(['dealerCommission']);
++                if ($bill->dealer_id && $bill->is_dealer_commission_applicable) {
++                    $dealerCommissionRate = (float) $bill->dealer_commission_pct;
++                    $dealerCommissionableAmount = $bill->items->reduce(function ($sum, $item) {
++                        if ($item->is_stock_item) {
++                            return $sum;
++                        }
++                        $cat = BillCategory::find($item->category_id);
++                        if ($cat && $cat->no_commission) {
++                            return $sum;
++                        }
++                        return $sum + ($item->quantity * $item->unit_price);
++                    }, 0);
++
++                    if ($bill->dealerCommission) {
++                        $bill->dealerCommission->update([
++                            'dealer_id' => $bill->dealer_id,
++                            'commission_pct' => $dealerCommissionRate,
++                            'commissionable_amount' => round($dealerCommissionableAmount, 2),
++                            'commission_amt' => round(($dealerCommissionableAmount * $dealerCommissionRate) / 100, 2),
++                            'total_bill_amt' => $bill->after_discount,
++                        ]);
++                    } else {
++                        DealerCommission::create([
++                            'shop_id' => $bill->shop_id,
++                            'bill_id' => $bill->id,
++                            'dealer_id' => $bill->dealer_id,
++                            'commission_date' => $bill->created_at ? $bill->created_at->toDateString() : now()->toDateString(),
++                            'total_bill_amt' => $bill->after_discount,
++                            'commissionable_amount' => round($dealerCommissionableAmount, 2),
++                            'commission_pct' => $dealerCommissionRate,
++                            'commission_amt' => round(($dealerCommissionableAmount * $dealerCommissionRate) / 100, 2),
++                            'is_paid' => false,
++                        ]);
++                    }
++                } else {
++                    if ($bill->dealerCommission) {
++                        $bill->dealerCommission->delete();
++                    }
++                }
+             });
+ 
+             return redirect()->route('studio.bills.show', $bill->id)
+@@ -723,6 +820,12 @@ class BillController extends Controller
+                     if ($commission && ! $commission->is_paid && (float) $commission->commission_amt > 0) {
+                         $this->billService->markCommissionPaid($commission, $request->user()?->getAuthIdentifier() ?? 0);
+                     }
++
++                    // Immediately mark dealer commission paid and add to salary ledger
++                    $bill->loadMissing(['dealerCommission']);
++                    if ($bill->dealerCommission && ! $bill->dealerCommission->is_paid && (float) $bill->dealerCommission->commission_amt > 0) {
++                        $this->billService->markDealerCommissionPaid($bill->dealerCommission, $request->user()?->getAuthIdentifier() ?? 0);
++                    }
+                 }
+ 
+                 // TODO: update daily sales aggregates/reports (left as hooks for reporting module)
+diff --git a/app/Http/Controllers/Studio/PosController.php b/app/Http/Controllers/Studio/PosController.php
+index dcb5735..f128acb 100644
+--- a/app/Http/Controllers/Studio/PosController.php
++++ b/app/Http/Controllers/Studio/PosController.php
+@@ -122,6 +122,14 @@ class PosController extends Controller
+                 ->get(['id', 'name', 'default_commission_pct', 'job_role'])
+             : collect();
+ 
++        $dealers = Schema::hasTable('employees')
++            ? Employee::query()
++                ->forShop($activeShop->id)
++                ->dealers()
++                ->orderBy('name', 'asc')
++                ->get(['id', 'name', 'default_commission_pct', 'job_role'])
++            : collect();
++
+         $frontOfficers = Schema::hasTable('employees')
+             ? Employee::query()
+                 ->forShop($activeShop->id)
+@@ -162,6 +170,7 @@ class PosController extends Controller
+             'packages' => $packages,
+             'itemTypes' => $itemTypes,
+             'editors' => $editors,
++            'dealers' => $dealers,
+             'frontOfficers' => $frontOfficers,
+             'recentBills' => $recentBills,
+             'customers' => $customers,
+diff --git a/app/Models/Bill.php b/app/Models/Bill.php
+index 635eeea..09df4be 100644
+--- a/app/Models/Bill.php
++++ b/app/Models/Bill.php
+@@ -17,8 +17,11 @@ class Bill extends Model
+         'status',
+         'created_by',
+         'editor_id',
++        'dealer_id',
+         'commission_pct',
++        'dealer_commission_pct',
+         'is_commission_applicable',
++        'is_dealer_commission_applicable',
+         'payment_method',
+         'customer_id',
+         'customer_name',
+@@ -47,7 +50,9 @@ class Bill extends Model
+         'advance_paid' => 'decimal:2',
+         'balance_due' => 'decimal:2',
+         'commission_pct' => 'decimal:2',
++        'dealer_commission_pct' => 'decimal:2',
+         'is_commission_applicable' => 'boolean',
++        'is_dealer_commission_applicable' => 'boolean',
+         'creation_charge' => 'decimal:2',
+     ];
+ 
+@@ -73,6 +78,11 @@ class Bill extends Model
+         return $this->hasOne(EditorCommission::class);
+     }
+ 
++    public function dealerCommission()
++    {
++        return $this->hasOne(DealerCommission::class);
++    }
++
+     public function advanceRefBill()
+     {
+         return $this->belongsTo(Bill::class, 'advance_ref_bill_id');
+@@ -88,6 +98,11 @@ class Bill extends Model
+         return $this->belongsTo(Employee::class, 'front_officer_id');
+     }
+ 
++    public function dealer()
++    {
++        return $this->belongsTo(Employee::class, 'dealer_id');
++    }
++
+     public function balanceBills()
+     {
+         return $this->hasMany(Bill::class, 'advance_ref_bill_id');
+@@ -105,6 +120,11 @@ class Bill extends Model
+         return $query->where('editor_id', $editorId);
+     }
+ 
++    public function scopeByDealer($query, int $dealerId)
++    {
++        return $query->where('dealer_id', $dealerId);
++    }
++
+     public function scopeByDateRange($query, string $startDate, string $endDate)
+     {
+         return $query->whereBetween('created_at', [$startDate, $endDate]);
+diff --git a/app/Models/DealerCommission.php b/app/Models/DealerCommission.php
+new file mode 100644
+index 0000000..90aa756
+--- /dev/null
++++ b/app/Models/DealerCommission.php
+@@ -0,0 +1,71 @@
++<?php
++
++namespace App\Models;
++
++use App\Models\Concerns\BelongsToShop;
++use Illuminate\Database\Eloquent\Model;
++
++class DealerCommission extends Model
++{
++    use BelongsToShop;
++    
++    protected $table = 'dealer_commissions';
++
++    protected $fillable = [
++        'shop_id',
++        'bill_id',
++        'dealer_id',
++        'commission_date',
++        'total_bill_amt',
++        'commissionable_amount',
++        'commission_pct',
++        'commission_amt',
++        'is_paid',
++        'paid_at',
++        'ledger_entry_id',
++    ];
++
++    protected $casts = [
++        'total_bill_amt' => 'decimal:2',
++        'commissionable_amount' => 'decimal:2',
++        'commission_pct' => 'decimal:2',
++        'commission_amt' => 'decimal:2',
++        'is_paid' => 'boolean',
++        'paid_at' => 'datetime',
++        'commission_date' => 'date',
++    ];
++
++    // ΓöÇΓöÇ Relationships ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
++
++    public function bill()
++    {
++        return $this->belongsTo(Bill::class);
++    }
++
++    public function dealer()
++    {
++        return $this->belongsTo(Employee::class, 'dealer_id');
++    }
++
++    public function salaryLedgerEntry()
++    {
++        return $this->belongsTo(SalaryLedgerEntry::class, 'ledger_entry_id');
++    }
++
++    // ΓöÇΓöÇ Scopes ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
++
++    public function scopeUnpaid($query)
++    {
++        return $query->where('is_paid', false);
++    }
++
++    public function scopeByDealer($query, int $dealerId)
++    {
++        return $query->where('dealer_id', $dealerId);
++    }
++
++    public function scopeByDateRange($query, string $startDate, string $endDate)
++    {
++        return $query->whereBetween('commission_date', [$startDate, $endDate]);
++    }
++}
+diff --git a/app/Models/Employee.php b/app/Models/Employee.php
+index bb780ee..9550001 100644
+--- a/app/Models/Employee.php
++++ b/app/Models/Employee.php
+@@ -68,11 +68,21 @@ class Employee extends Model
+         return $this->hasMany(Bill::class, 'editor_id');
+     }
+ 
++    public function billsAsDealer(): HasMany
++    {
++        return $this->hasMany(Bill::class, 'dealer_id');
++    }
++
+     public function commissions(): HasMany
+     {
+         return $this->hasMany(EditorCommission::class, 'editor_id');
+     }
+ 
++    public function dealerCommissions(): HasMany
++    {
++        return $this->hasMany(DealerCommission::class, 'dealer_id');
++    }
++
+     public function scopeEditors(Builder $query): Builder
+     {
+         return $query->where(function (Builder $builder) {
+@@ -81,6 +91,14 @@ class Employee extends Model
+         });
+     }
+ 
++    public function scopeDealers(Builder $query): Builder
++    {
++        return $query->where(function (Builder $builder) {
++            $builder->where('job_role', 'like', '%dealer%')
++                ->orWhere('role', 'like', '%dealer%');
++        });
++    }
++
+     public function scopeSearch(Builder $query, ?string $term): Builder
+     {
+         $term = trim((string) $term);
+diff --git a/app/Services/BillService.php b/app/Services/BillService.php
+index 8bb21a9..b40d5b0 100644
+--- a/app/Services/BillService.php
++++ b/app/Services/BillService.php
+@@ -5,6 +5,7 @@ namespace App\Services;
+ use App\Models\Bill;
+ use App\Models\BillItem;
+ use App\Models\EditorCommission;
++use App\Models\DealerCommission;
+ use App\Contracts\InventoryServiceInterface;
+ use App\Models\Inventory;
+ use App\Models\SalaryLedgerEntry;
+@@ -157,20 +158,45 @@ class BillService
+                     }
+                 }
+ 
++                $dealerId = $data['dealer_id'] ?? null;
++                $isDealerCommissionApplicable = (bool) ($data['is_dealer_commission_applicable'] ?? true);
++
++                if ($isDealerCommissionApplicable && !empty($itemsData)) {
++                    $allNoCommission = true;
++                    foreach ($itemsData as $item) {
++                        if ($item['category_id']) {
++                            $category = \App\Models\BillCategory::query()->find($item['category_id']);
++                            if (!$category?->no_commission) {
++                                $allNoCommission = false;
++                                break;
++                            }
++                        } else {
++                            $allNoCommission = false;
++                            break;
++                        }
++                    }
++                    if ($allNoCommission) {
++                        $isDealerCommissionApplicable = false;
++                    }
++                }
++
+                 // ΓöÇΓöÇ 5. Create bill record ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+                 $shopId = $this->resolveShopId();
+ 
+-                $billPayload = [
++                 $billPayload = [
+                     'shop_id' => $shopId,
+                     'bill_number' => $this->generateBillNumber(),
+                     'status' => $data['status'] ?? 'processing',
+                     'created_by' => $data['created_by'],
+                     'editor_id' => $editorId,
++                    'dealer_id' => $dealerId,
+                     'creation_charge' => $creationCharge,
+                     'advance_ref_bill_id' => $data['advance_ref_bill_id'] ?? null,
+                     'advance_paid' => $advancePaid,
+                     'commission_pct' => $data['commission_pct'] ?? null,
++                    'dealer_commission_pct' => $data['dealer_commission_pct'] ?? null,
+                     'is_commission_applicable' => $isCommissionApplicable,
++                    'is_dealer_commission_applicable' => $isDealerCommissionApplicable,
+                     'payment_method' => $data['payment_method'] ?? 'cash',
+                     'card_ref' => $data['card_ref'] ?? null,
+                     'subtotal' => $subtotal,
+@@ -241,6 +267,14 @@ class BillService
+                     }
+                 }
+ 
++                // ΓöÇΓöÇ 7c. Create dealer commission if applicable ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
++                if ($dealerId && $isDealerCommissionApplicable && ($data['dealer_commission_pct'] ?? 0) > 0) {
++                    $commissionableForDealer = $this->calculateCommissionableAmount($bill);
++                    if ($commissionableForDealer > 0) {
++                        $this->createDealerCommissionRecord($bill, $dealerId, (float) $data['dealer_commission_pct']);
++                    }
++                }
++
+                 // ΓöÇΓöÇ 7b. Create salary allowance for creation charge ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+                 // If there is a creation charge, add it as a salary allowance (not commission)
+                 // for the assigned editor.
+@@ -526,6 +560,29 @@ class BillService
+         ]);
+     }
+ 
++    /**
++     * Create dealer commission record.
++     */
++    public function createDealerCommissionRecord(Bill $bill, int $dealerId, float $commissionPct): DealerCommission
++    {
++        $bill->loadMissing(['items.category']);
++
++        $commissionableAmount = $this->calculateCommissionableAmount($bill);
++        $commissionAmt = $this->money($commissionableAmount * $commissionPct / 100);
++
++        return DealerCommission::create([
++            'shop_id' => $bill->shop_id,
++            'bill_id' => $bill->id,
++            'dealer_id' => $dealerId,
++            'commission_date' => $bill->created_at->toDateString(),
++            'total_bill_amt' => $bill->after_discount,
++            'commissionable_amount' => $commissionableAmount,
++            'commission_pct' => $commissionPct,
++            'commission_amt' => $commissionAmt,
++            'is_paid' => false,
++        ]);
++    }
++
+     /**
+      * Update bill (status, notes, etc.) ΓÇö does NOT recalculate items.
+      * To modify items, must delete and recreate.
+@@ -692,4 +749,80 @@ class BillService
+             return $commission->fresh(['bill', 'editor', 'salaryLedgerEntry']);
+         });
+     }
++
++    /**
++     * Mark a dealer commission as paid and add to salary ledger.
++     *
++     * @param DealerCommission $commission
++     * @param int $processedBy auth()->id()
++     *
++     * @return DealerCommission Fully updated commission with ledger relationship loaded
++     * @throws \InvalidArgumentException if already paid or ledger_entry_id not null
++     * @throws \Throwable
++     */
++    public function markDealerCommissionPaid(DealerCommission $commission, int $processedBy): DealerCommission
++    {
++        return DB::transaction(function () use ($commission, $processedBy) {
++            // ΓöÇΓöÇ Guard 1: Check if already added to salary ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
++            if ($commission->is_paid || $commission->ledger_entry_id) {
++                throw new \InvalidArgumentException(
++                    'This commission has already been added to the salary ledger. ' .
++                    'It cannot be marked paid again.'
++                );
++            }
++
++            // ΓöÇΓöÇ Guard 2: Require commission amount > 0 ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
++            $commissionAmt = (float) $commission->commission_amt;
++            if ($commissionAmt <= 0) {
++                throw new \InvalidArgumentException('Commission amount must be greater than zero.');
++            }
++
++            $commissionDate = $commission->commission_date instanceof Carbon
++                ? $commission->commission_date
++                : Carbon::parse($commission->commission_date);
++
++            $salaryProfile = SalaryProfile::query()
++                ->where('employee_id', $commission->dealer_id)
++                ->whereDate('month', $commissionDate->copy()->startOfMonth()->toDateString())
++                ->first();
++
++            if (!$salaryProfile) {
++                $salaryProfile = SalaryProfile::create([
++                    'employee_id' => $commission->dealer_id,
++                    'month' => $commissionDate->copy()->startOfMonth()->toDateString(),
++                    'basic_salary' => 0,
++                    'attendance_allowance' => 0,
++                    'overtime_rate' => 0,
++                    'notes' => 'Auto-created for dealer commission payment',
++                ]);
++            }
++
++            if ($salaryProfile->paid_at) {
++                throw new \InvalidArgumentException('This salary profile is already paid and the ledger is locked.');
++            }
++
++            // ΓöÇΓöÇ Step 1: Insert into salary_ledger_entries ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
++            $ledgerEntry = $salaryProfile->ledgerEntries()->create([
++                'type' => 'allowance',
++                'entry_date' => $commissionDate->toDateString(),
++                'title' => sprintf(
++                    'Dealer Commission Bill #%s (%s)',
++                    $commission->bill?->bill_number ?? 'N/A',
++                    $commission->commission_date?->format('M Y') ?? 'N/A'
++                ),
++                'amount' => $commissionAmt,
++                'notes' => sprintf('Recorded by user #%d', $processedBy),
++            ]);
++
++            // ΓöÇΓöÇ Step 2: Update dealer_commissions with ledger_entry_id ΓöÇΓöÇΓöÇ
++            $commission->update([
++                'is_paid' => true,
++                'paid_at' => now(),
++                'ledger_entry_id' => $ledgerEntry->id,
++            ]);
++
++            // ΓöÇΓöÇ Step 3: Return fully updated commission ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
++            return $commission->fresh(['bill', 'dealer', 'salaryLedgerEntry']);
++        });
++    }
+ }
+diff --git a/database/migrations/2026_08_14_110000_add_dealer_fields_to_bills.php b/database/migrations/2026_08_14_110000_add_dealer_fields_to_bills.php
+new file mode 100644
+index 0000000..57e736d
+--- /dev/null
++++ b/database/migrations/2026_08_14_110000_add_dealer_fields_to_bills.php
+@@ -0,0 +1,39 @@
++<?php
++
++use Illuminate\Database\Migrations\Migration;
++use Illuminate\Database\Schema\Blueprint;
++use Illuminate\Support\Facades\Schema;
++
++return new class extends Migration
++{
++    public function up(): void
++    {
++        Schema::table('bills', function (Blueprint $table) {
++            if (! Schema::hasColumn('bills', 'dealer_id')) {
++                $table->unsignedBigInteger('dealer_id')->nullable()->after('editor_id');
++                $table->index('dealer_id');
++            }
++            if (! Schema::hasColumn('bills', 'dealer_commission_pct')) {
++                $table->decimal('dealer_commission_pct', 5, 2)->nullable()->after('commission_pct');
++            }
++            if (! Schema::hasColumn('bills', 'is_dealer_commission_applicable')) {
++                $table->boolean('is_dealer_commission_applicable')->default(true)->after('is_commission_applicable');
++            }
++        });
++    }
++
++    public function down(): void
++    {
++        Schema::table('bills', function (Blueprint $table) {
++            if (Schema::hasColumn('bills', 'dealer_id')) {
++                $table->dropColumn('dealer_id');
++            }
++            if (Schema::hasColumn('bills', 'dealer_commission_pct')) {
++                $table->dropColumn('dealer_commission_pct');
++            }
++            if (Schema::hasColumn('bills', 'is_dealer_commission_applicable')) {
++                $table->dropColumn('is_dealer_commission_applicable');
++            }
++        });
++    }
++};
+diff --git a/database/migrations/2026_08_14_110500_create_dealer_commissions_table.php b/database/migrations/2026_08_14_110500_create_dealer_commissions_table.php
+new file mode 100644
+index 0000000..58f0523
+--- /dev/null
++++ b/database/migrations/2026_08_14_110500_create_dealer_commissions_table.php
+@@ -0,0 +1,44 @@
++<?php
++
++use Illuminate\Database\Migrations\Migration;
++use Illuminate\Database\Schema\Blueprint;
++use Illuminate\Support\Facades\Schema;
++
++return new class extends Migration
++{
++    public function up(): void
++    {
++        Schema::create('dealer_commissions', function (Blueprint $table) {
++            $table->id();
++            
++            $table->unsignedBigInteger('shop_id')->nullable();
++            $table->foreignId('bill_id')->unique()->constrained()->cascadeOnDelete();
++            
++            $table->unsignedBigInteger('dealer_id');
++            $table->date('commission_date');
++            
++            $table->decimal('total_bill_amt', 10, 2);
++            $table->decimal('commissionable_amount', 10, 2);
++            $table->decimal('commission_pct', 5, 2);
++            $table->decimal('commission_amt', 10, 2);
++            
++            $table->boolean('is_paid')->default(false);
++            $table->timestamp('paid_at')->nullable();
++            
++            $table->unsignedBigInteger('ledger_entry_id')->nullable()->unique();
++            
++            $table->timestamps();
++
++            $table->index('shop_id');
++            $table->index('dealer_id');
++            $table->index('commission_date');
++            $table->index('is_paid');
++            $table->index('ledger_entry_id');
++        });
++    }
++
++    public function down(): void
++    {
++        Schema::dropIfExists('dealer_commissions');
++    }
++};
+diff --git a/resources/js/Components/POS/ManualEntryTab.jsx b/resources/js/Components/POS/ManualEntryTab.jsx
+index 816592a..0b8bd37 100644
+--- a/resources/js/Components/POS/ManualEntryTab.jsx
++++ b/resources/js/Components/POS/ManualEntryTab.jsx
+@@ -21,12 +21,26 @@ export default function ManualEntryTab({
+     commissionAmount = 0,
+     commissionLocked = false,
+     commissionEditable = true,
++
++    dealers = [],
++    selectedDealerId = '',
++    dealerCommissionPct = '',
++    applyDealerCommission = true,
++    dealerCommissionableAmount = 0,
++    dealerCommissionAmount = 0,
++    dealerCommissionLocked = false,
++    dealerCommissionEditable = true,
++
+     onAddRow,
+     onUpdateRow,
+     onRemoveRow,
+     onEditorChange,
+     onCommissionPctChange,
+     onApplyCommissionChange,
++
++    onDealerChange,
++    onDealerCommissionPctChange,
++    onApplyDealerCommissionChange,
+ }) {
+     const itemTypeMap = useMemo(() => {
+         return Object.fromEntries(itemTypes.map((itemType) => [String(itemType.id), itemType]));
+@@ -56,10 +70,10 @@ export default function ManualEntryTab({
+                             <tr className="border-b border-slate-100 dark:border-slate-700/50">
+                                 <th className="px-6 py-4 text-left text-[11px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest">Category</th>
+                                 <th className="px-6 py-4 text-left text-[11px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest">Job Description</th>
+-                                <th className="px-6 py-4 text-center text-[11px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest w-24">Qty</th>
+-                                <th className="px-6 py-4 text-right text-[11px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest w-40">Unit Price</th>
+-                                <th className="px-6 py-4 text-right text-[11px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest w-44">Total</th>
+-                                <th className="px-6 py-4 text-right text-[11px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest w-16"></th>
++                                <th className="px-6 py-4 text-center text-[11px] font-bold text-slate-400 dark:text-slate-550 uppercase tracking-widest w-24">Qty</th>
++                                <th className="px-6 py-4 text-right text-[11px] font-bold text-slate-400 dark:text-slate-550 uppercase tracking-widest w-40">Unit Price</th>
++                                <th className="px-6 py-4 text-right text-[11px] font-bold text-slate-400 dark:text-slate-550 uppercase tracking-widest w-44">Total</th>
++                                <th className="px-6 py-4 text-right text-[11px] font-bold text-slate-400 dark:text-slate-550 uppercase tracking-widest w-16"></th>
+                             </tr>
+                         </thead>
+                         <tbody className="divide-y divide-slate-100 dark:divide-slate-700/50">
+@@ -103,7 +117,7 @@ export default function ManualEntryTab({
+                                                 step="0.01"
+                                                 value={row.quantity}
+                                                 onChange={(e) => onUpdateRow(row.id, 'quantity', e.target.value)}
+-                                                className="w-full px-3 py-2.5 rounded-xl border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 text-sm text-center font-semibold text-slate-700 dark:text-white focus:outline-none focus:ring-4 focus:ring-primary-500/10 focus:border-primary-500 transition-all"
++                                                className="w-full px-3 py-2.5 rounded-xl border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 text-sm text-center font-semibold text-slate-700 dark:text-white focus:outline-none focus:ring-4 focus:ring-primary-500/10 focus:border-primary-550 transition-all"
+                                             />
+                                         </td>
+                                         <td className="px-6 py-4 w-40">
+@@ -115,7 +129,7 @@ export default function ManualEntryTab({
+                                                     step="0.01"
+                                                     value={row.unit_price}
+                                                     onChange={(e) => onUpdateRow(row.id, 'unit_price', e.target.value)}
+-                                                    className="w-full pl-11 pr-4 py-2.5 rounded-xl border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 text-sm text-right font-semibold text-slate-700 dark:text-white focus:outline-none focus:ring-4 focus:ring-primary-500/10 focus:border-primary-500 transition-all"
++                                                    className="w-full pl-11 pr-4 py-2.5 rounded-xl border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 text-sm text-right font-semibold text-slate-700 dark:text-white focus:outline-none focus:ring-4 focus:ring-primary-500/10 focus:border-primary-550 transition-all"
+                                                 />
+                                             </div>
+                                         </td>
+@@ -229,7 +243,7 @@ export default function ManualEntryTab({
+                                 </div>
+                             </div>
+                         ) : (
+-                            <div className="flex items-center justify-center p-8 rounded-3xl border-2 border-dashed border-slate-100 dark:border-slate-700/50 text-center">
++                            <div className="flex items-center justify-center p-8 rounded-3xl border-2 border-dashed border-slate-100 dark:border-slate-750 text-center">
+                                 <div>
+                                     <p className="text-sm font-medium text-slate-400">Select an editor to view commission details.</p>
+                                 </div>
+@@ -238,6 +252,102 @@ export default function ManualEntryTab({
+                     </div>
+                 </div>
+             </div>
++
++            <div className="pt-6 border-t border-slate-100 dark:border-slate-700/50">
++                <div className="max-w-2xl">
++                    <div className="flex items-center gap-3 mb-6">
++                        <div className="p-2 rounded-xl bg-primary-500/10 text-primary-600 dark:text-primary-400">
++                            <User className="w-5 h-5" />
++                        </div>
++                        <div>
++                            <h3 className="font-bold text-slate-800 dark:text-white">Dealer Assignment</h3>
++                            <p className="text-xs text-slate-400">Assign a dealer to track referral commission.</p>
++                        </div>
++                    </div>
++
++                    <div className="grid grid-cols-1 md:grid-cols-2 gap-8 items-start">
++                        <div className="space-y-4">
++                            <div>
++                                <label className="block text-[10px] font-bold text-slate-400 dark:text-slate-500 mb-2 uppercase tracking-widest">Select Dealer</label>
++                                <div className="relative">
++                                    <select
++                                        value={selectedDealerId}
++                                        onChange={(e) => onDealerChange(e.target.value)}
++                                        className="w-full px-4 py-3 pr-10 rounded-2xl border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 bg-none text-sm text-slate-700 dark:text-white focus:outline-none focus:ring-4 focus:ring-primary-500/10 focus:border-primary-500 transition-all appearance-none [&::-ms-expand]:hidden"
++                                    >
++                                        <option value="">No dealer assigned</option>
++                                        {dealers.map((dealer) => (
++                                            <option key={dealer.id} value={dealer.id}>
++                                                {dealer.name}
++                                            </option>
++                                        ))}
++                                    </select>
++                                    <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-4">
++                                        <ChevronDown className="w-4 h-4 text-slate-400" />
++                                    </div>
++                                </div>
++                            </div>
++
++                            {selectedDealerId && (
++                                <div className="flex items-center justify-between p-4 rounded-2xl bg-slate-50 dark:bg-slate-900/50 border border-slate-100 dark:border-slate-700/50">
++                                    <div>
++                                        <p className="text-sm font-bold text-slate-700 dark:text-white">Dealer Commission</p>
++                                        <p className="text-[10px] font-medium text-slate-400 uppercase tracking-wide mt-0.5">Calculated from total of commissionable items.</p>
++                                    </div>
++                                    <label className="relative inline-flex items-center cursor-pointer">
++                                        <input
++                                            type="checkbox"
++                                            className="sr-only peer"
++                                            checked={applyDealerCommission}
++                                            onChange={(e) => onApplyDealerCommissionChange(e.target.checked)}
++                                            disabled={dealerCommissionLocked}
++                                        />
++                                        <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-primary-500/20 rounded-full peer dark:bg-slate-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-slate-600 peer-checked:bg-primary-500" />
++                                    </label>
++                                </div>
++                            )}
++                        </div>
++
++                        {selectedDealerId ? (
++                            <div className="grid grid-cols-2 gap-4">
++                                <div className="p-5 rounded-3xl bg-slate-50 dark:bg-slate-900/50 border border-slate-100 dark:border-slate-700/50">
++                                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-3">Comm. Rate</p>
++                                    <div className="flex items-end gap-1">
++                                        <input
++                                            type="number"
++                                            min="0"
++                                            max="100"
++                                            step="0.01"
++                                            value={dealerCommissionPct}
++                                            onChange={(e) => onDealerCommissionPctChange(e.target.value)}
++                                            disabled={!dealerCommissionEditable}
++                                            className="w-16 bg-transparent text-2xl font-bold text-slate-800 dark:text-white focus:outline-none"
++                                        />
++                                        <span className="text-lg font-bold text-slate-400 mb-1">%</span>
++                                    </div>
++                                </div>
++                                <div className="p-5 rounded-3xl bg-primary-500/5 border border-primary-500/10">
++                                    <p className="text-2xl font-black text-primary-600 dark:text-primary-300">
++                                        {formatCurrency(dealerCommissionAmount).replace('LKR', '')}
++                                        <span className="text-xs ml-1 font-bold">LKR</span>
++                                    </p>
++                                    {dealerCommissionableAmount <= 0 && (
++                                        <p className="mt-2 text-[10px] font-medium leading-snug text-amber-600 dark:text-amber-400">
++                                            No commissionable items.
++                                        </p>
++                                    )}
++                                </div>
++                            </div>
++                        ) : (
++                            <div className="flex items-center justify-center p-8 rounded-3xl border-2 border-dashed border-slate-100 dark:border-slate-770 text-center">
++                                <div>
++                                    <p className="text-sm font-medium text-slate-400">Select a dealer to view commission details.</p>
++                                </div>
++                            </div>
++                        )}
++                    </div>
++                </div>
++            </div>
+         </div>
+     );
+ }
+diff --git a/resources/js/Pages/Studio/Bills/Create.jsx b/resources/js/Pages/Studio/Bills/Create.jsx
+index 786d928..c7f5c49 100644
+--- a/resources/js/Pages/Studio/Bills/Create.jsx
++++ b/resources/js/Pages/Studio/Bills/Create.jsx
+@@ -96,12 +96,15 @@ function BillLineItem({
+ // ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+ // Main Create Bill Form
+ // ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+-export default function CreateBill({ itemTypes = [], editors, defaultCommissionPct }) {
++export default function CreateBill({ itemTypes = [], editors, dealers = [], defaultCommissionPct }) {
+     const { data, setData, processing, errors, reset } = useForm({
+         items: [{ category_id: null, description: '', quantity: 1, unit_price: 0, autoFilled: false }],
+         editor_id: null,
+         commission_pct: defaultCommissionPct || 10,
+         apply_commission: true,
++        dealer_id: null,
++        dealer_commission_pct: 0,
++        apply_dealer_commission: true,
+         discount_type: 'amount',
+         discount_value: 0,
+         advance_ref_bill_id: null,
+@@ -149,6 +152,34 @@ export default function CreateBill({ itemTypes = [], editors, defaultCommissionP
+         return (commissionableAmount * data.commission_pct) / 100;
+     }, [commissionableAmount, data.commission_pct, data.apply_commission, data.editor_id]);
+ 
++    // ΓöÇΓöÇ Dealer Commissionable amount ΓöÇΓöÇ
++    const dealerCommissionableAmount = useMemo(() => {
++        if (!data.apply_dealer_commission) return 0;
++
++        return data.items.reduce((sum, item) => {
++            const line = (item.unit_price || 0) * (item.quantity || 0);
++            if (item.category_id) {
++                const cat = itemTypes.find(c => c.id === item.category_id);
++                if (cat?.no_commission) return sum; // Skip Passport, etc.
++            }
++            return sum + line;
++        }, 0);
++    }, [data.items, data.apply_dealer_commission, itemTypes]);
++
++    const dealerCommissionAmount = useMemo(() => {
++        if (!data.apply_dealer_commission || !data.dealer_id) return 0;
++        return (dealerCommissionableAmount * data.dealer_commission_pct) / 100;
++    }, [dealerCommissionableAmount, data.dealer_commission_pct, data.apply_dealer_commission, data.dealer_id]);
++
++    useEffect(() => {
++        if (!data.dealer_id) {
++            setData('dealer_commission_pct', 0);
++            return;
++        }
++        const dl = dealers.find(d => String(d.id) === String(data.dealer_id));
++        setData('dealer_commission_pct', dl?.default_commission_pct != null ? Number(dl.default_commission_pct) : 0);
++    }, [data.dealer_id, dealers]);
++
+     const balanceDue = Math.max(0, afterDiscount - (data.deduct_advance ? (data.advance_ref_bill_id || 0) : 0));
+ 
+     // ΓöÇΓöÇ Handlers ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+@@ -200,6 +231,9 @@ export default function CreateBill({ itemTypes = [], editors, defaultCommissionP
+             editor_id: data.editor_id,
+             commission_pct: data.commission_pct,
+             apply_commission: data.apply_commission,
++            dealer_id: data.dealer_id,
++            dealer_commission_pct: data.dealer_commission_pct,
++            is_dealer_commission_applicable: data.apply_dealer_commission,
+             discount_amount: discountAmount,
+             advance_deducted: data.deduct_advance ? (data.advance_ref_bill_id || 0) : 0,
+             payment_method: data.payment_method,
+@@ -277,11 +311,11 @@ export default function CreateBill({ itemTypes = [], editors, defaultCommissionP
+                                             key={idx}
+                                             index={idx}
+                                             item={item}
+-                                                itemTypes={itemTypes}
++                                            itemTypes={itemTypes}
+                                             onChange={updateLineItem}
+                                             onDelete={deleteLineItem}
+                                             isCommissionable={
+-                                                    !itemTypes.find(c => c.id === item.category_id)
++                                                !itemTypes.find(c => c.id === item.category_id)
+                                                     ?.no_commission
+                                             }
+                                         />
+@@ -334,11 +368,10 @@ export default function CreateBill({ itemTypes = [], editors, defaultCommissionP
+                                     <button
+                                         type="button"
+                                         onClick={() => setData('apply_commission', !data.apply_commission)}
+-                                        className={`w-full px-3 py-2 rounded-lg font-medium transition-colors ${
+-                                            data.apply_commission
++                                        className={`w-full px-3 py-2 rounded-lg font-medium transition-colors ${data.apply_commission
+                                                 ? 'bg-primary-100 dark:bg-primary-900/30 text-primary-600 dark:text-primary-400'
+                                                 : 'bg-gray-100 dark:bg-slate-700 text-gray-600 dark:text-gray-400'
+-                                        }`}
++                                            }`}
+                                     >
+                                         {data.apply_commission ? 'YES' : 'NO'}
+                                     </button>
+@@ -367,6 +400,83 @@ export default function CreateBill({ itemTypes = [], editors, defaultCommissionP
+                                 </div>
+                             )}
+                         </div>
++
++                        {/* Dealer + Commission Section */}
++                        <div className="bg-white dark:bg-slate-800 rounded-2xl border border-gray-100 dark:border-slate-700 p-6">
++                            <h3 className="text-sm font-bold text-gray-900 dark:text-white mb-4">
++                                Dealer Commission
++                            </h3>
++                            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
++                                <div>
++                                    <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-2">
++                                        Assigned Dealer
++                                    </label>
++                                    <select
++                                        value={data.dealer_id || ''}
++                                        onChange={e => setData('dealer_id', e.target.value ? parseInt(e.target.value) : null)}
++                                        className="w-full px-3 py-2 rounded-lg border border-gray-200 dark:border-slate-600 bg-white dark:bg-slate-700 text-gray-900 dark:text-white"
++                                    >
++                                        <option value="">None</option>
++                                        {dealers.map(dl => (
++                                            <option key={dl.id} value={dl.id}>
++                                                {dl.name}
++                                            </option>
++                                        ))}
++                                    </select>
++                                </div>
++                                <div>
++                                    <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-2">
++                                        Commission %
++                                    </label>
++                                    <input
++                                        type="number"
++                                        value={data.dealer_commission_pct || 0}
++                                        onChange={e => setData('dealer_commission_pct', parseFloat(e.target.value))}
++                                        min="0"
++                                        max="100"
++                                        step="0.1"
++                                        className="w-full px-3 py-2 rounded-lg border border-gray-200 dark:border-slate-600 bg-white dark:bg-slate-700 text-gray-900 dark:text-white"
++                                    />
++                                </div>
++                                <div>
++                                    <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-2">
++                                        Apply Commission
++                                    </label>
++                                    <button
++                                        type="button"
++                                        onClick={() => setData('apply_dealer_commission', !data.apply_dealer_commission)}
++                                        className={`w-full px-3 py-2 rounded-lg font-medium transition-colors ${data.apply_dealer_commission
++                                                ? 'bg-primary-100 dark:bg-primary-900/30 text-primary-600 dark:text-primary-400'
++                                                : 'bg-gray-100 dark:bg-slate-700 text-gray-600 dark:text-gray-400'
++                                            }`}
++                                    >
++                                        {data.apply_dealer_commission ? 'YES' : 'NO'}
++                                    </button>
++                                </div>
++                            </div>
++
++                            {/* Dealer Commission Summary */}
++                            {data.apply_dealer_commission && (
++                                <div className="mt-4 p-3 rounded-lg bg-primary-50 dark:bg-primary-900/20 border border-primary-200 dark:border-primary-800">
++                                    <div className="flex justify-between items-center">
++                                        <span className="text-sm text-primary-900 dark:text-primary-200">
++                                            Commissionable Amount:
++                                        </span>
++                                        <span className="font-bold text-primary-600 dark:text-primary-400">
++                                            LKR {Number(dealerCommissionableAmount).toFixed(2)}
++                                        </span>
++                                    </div>
++                                    <div className="flex justify-between items-center mt-2 pt-2 border-t border-primary-200 dark:border-primary-800">
++                                        <span className="text-sm font-medium text-primary-900 dark:text-primary-200">
++                                            Commission Amount:
++                                        </span>
++                                        <span className="text-lg font-bold text-primary-600 dark:text-primary-400">
++                                            LKR {Number(dealerCommissionAmount).toFixed(2)}
++                                        </span>
++                                    </div>
++                                </div>
++                            )}
++                        </div>
+                     </div>
+ 
+                     {/* ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+@@ -416,11 +526,10 @@ export default function CreateBill({ itemTypes = [], editors, defaultCommissionP
+                                             key={type}
+                                             type="button"
+                                             onClick={() => setData('discount_type', type)}
+-                                            className={`flex-1 px-2 py-1 text-xs rounded font-medium transition-colors ${
+-                                                data.discount_type === type
++                                            className={`flex-1 px-2 py-1 text-xs rounded font-medium transition-colors ${data.discount_type === type
+                                                     ? 'bg-primary-500 text-white'
+                                                     : 'bg-gray-100 dark:bg-slate-700 text-gray-700 dark:text-gray-300'
+-                                            }`}
++                                                }`}
+                                         >
+                                             {type === 'amount' ? 'LKR' : '%'}
+                                         </button>
+@@ -478,11 +587,10 @@ export default function CreateBill({ itemTypes = [], editors, defaultCommissionP
+                                             key={method}
+                                             type="button"
+                                             onClick={() => setData('payment_method', method)}
+-                                            className={`w-full px-3 py-2 rounded-lg font-medium text-sm transition-colors ${
+-                                                data.payment_method === method
++                                            className={`w-full px-3 py-2 rounded-lg font-medium text-sm transition-colors ${data.payment_method === method
+                                                     ? 'bg-primary-500 text-white'
+                                                     : 'bg-gray-100 dark:bg-slate-700 text-gray-700 dark:text-gray-300'
+-                                            }`}
++                                                }`}
+                                         >
+                                             {method === 'split' ? 'Split Payment' : method.charAt(0).toUpperCase() + method.slice(1)}
+                                         </button>
+diff --git a/resources/js/Pages/Studio/Bills/Edit.jsx b/resources/js/Pages/Studio/Bills/Edit.jsx
+index 3632762..b89f698 100644
+--- a/resources/js/Pages/Studio/Bills/Edit.jsx
++++ b/resources/js/Pages/Studio/Bills/Edit.jsx
+@@ -90,7 +90,7 @@ function BillLineItem({
+     );
+ }
+ 
+-export default function EditBill({ bill, itemTypes = [], editors }) {
++export default function EditBill({ bill, itemTypes = [], editors, dealers = [] }) {
+     const { data, setData, processing, errors } = useForm({
+         items: bill.items.map(item => ({
+             id: item.id,
+@@ -104,6 +104,9 @@ export default function EditBill({ bill, itemTypes = [], editors }) {
+         editor_id: bill.editor_id,
+         commission_pct: bill.commission_pct || 15,
+         is_commission_applicable: !!bill.is_commission_applicable,
++        dealer_id: bill.dealer_id,
++        dealer_commission_pct: bill.dealer_commission_pct || 0,
++        is_dealer_commission_applicable: !!bill.is_dealer_commission_applicable,
+         discount_amount: bill.discount_amount || 0,
+         payment_method: bill.payment_method,
+         notes: bill.notes || '',
+@@ -136,6 +139,37 @@ export default function EditBill({ bill, itemTypes = [], editors }) {
+         return (commissionableAmount * data.commission_pct) / 100;
+     }, [commissionableAmount, data.commission_pct, data.is_commission_applicable, data.editor_id]);
+ 
++    const dealerCommissionableAmount = useMemo(() => {
++        if (!data.is_dealer_commission_applicable) return 0;
++        return data.items.reduce((sum, item) => {
++            if (item.is_stock_item) {
++                return sum;
++            }
++            const line = (item.unit_price || 0) * (item.quantity || 0);
++            if (item.category_id) {
++                const cat = itemTypes.find(c => c.id === item.category_id);
++                if (cat?.no_commission) return sum;
++            }
++            return sum + line;
++        }, 0);
++    }, [data.items, data.is_dealer_commission_applicable, itemTypes]);
++
++    const dealerCommissionAmount = useMemo(() => {
++        if (!data.is_dealer_commission_applicable || !data.dealer_id) return 0;
++        return (dealerCommissionableAmount * data.dealer_commission_pct) / 100;
++    }, [dealerCommissionableAmount, data.dealer_commission_pct, data.is_dealer_commission_applicable, data.dealer_id]);
++
++    useEffect(() => {
++        if (!data.dealer_id) {
++            setData('dealer_commission_pct', 0);
++            return;
++        }
++        const dl = dealers.find(d => String(d.id) === String(data.dealer_id));
++        if (dl && String(dl.id) !== String(bill.dealer_id)) {
++            setData('dealer_commission_pct', dl.default_commission_pct != null ? Number(dl.default_commission_pct) : 0);
++        }
++    }, [data.dealer_id, dealers, bill.dealer_id]);
++
+     const addLineItem = () => {
+         setData('items', [
+             ...data.items,
+@@ -171,11 +205,10 @@ export default function EditBill({ bill, itemTypes = [], editors }) {
+                     Back
+                 </button>
+                 <div className="flex items-center gap-2">
+-                    <span className={`px-3 py-1 rounded-full text-xs font-bold uppercase ${
+-                        bill.status === 'delivered' ? 'bg-emerald-100 text-emerald-700' :
+-                        bill.status === 'delivered' ? 'bg-blue-100 text-blue-700' :
+-                        'bg-amber-100 text-amber-700'
+-                    }`}>
++                    <span className={`px-3 py-1 rounded-full text-xs font-bold uppercase ${bill.status === 'delivered' ? 'bg-emerald-100 text-emerald-700' :
++                            bill.status === 'delivered' ? 'bg-blue-100 text-blue-700' :
++                                'bg-amber-100 text-amber-700'
++                        }`}>
+                         {bill.status}
+                     </span>
+                 </div>
+@@ -225,7 +258,7 @@ export default function EditBill({ bill, itemTypes = [], editors }) {
+ 
+                         <div className="bg-white dark:bg-slate-800 rounded-2xl border border-gray-100 dark:border-slate-700 p-6">
+                             <h3 className="text-sm font-bold text-gray-900 dark:text-white mb-4">Commission & Notes</h3>
+-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
++                            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                                 <div className="space-y-4">
+                                     <div>
+                                         <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-2">Editor</label>
+@@ -263,6 +296,45 @@ export default function EditBill({ bill, itemTypes = [], editors }) {
+                                         </div>
+                                     </div>
+                                 </div>
++
++                                <div className="space-y-4">
++                                    <div>
++                                        <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-2">Dealer</label>
++                                        <select
++                                            value={data.dealer_id || ''}
++                                            onChange={e => setData('dealer_id', e.target.value ? parseInt(e.target.value) : null)}
++                                            className="w-full px-3 py-2 rounded-lg border border-gray-200 dark:border-slate-600 bg-white dark:bg-slate-700 text-gray-900 dark:text-white"
++                                        >
++                                            <option value="">None</option>
++                                            {dealers.map(dl => (
++                                                <option key={dl.id} value={dl.id}>{dl.name}</option>
++                                            ))}
++                                        </select>
++                                    </div>
++                                    <div className="flex items-center gap-4">
++                                        <div className="flex-1">
++                                            <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-2">Rate %</label>
++                                            <input
++                                                type="number"
++                                                value={data.dealer_commission_pct}
++                                                onChange={e => setData('dealer_commission_pct', parseFloat(e.target.value))}
++                                                className="w-full px-3 py-2 rounded-lg border border-gray-200 dark:border-slate-600 bg-white dark:bg-slate-700 text-gray-900 dark:text-white"
++                                            />
++                                        </div>
++                                        <div className="pt-6">
++                                            <label className="flex items-center gap-2 cursor-pointer">
++                                                <input
++                                                    type="checkbox"
++                                                    checked={data.is_dealer_commission_applicable}
++                                                    onChange={e => setData('is_dealer_commission_applicable', e.target.checked)}
++                                                    className="rounded border-gray-300"
++                                                />
++                                                <span className="text-sm text-gray-700 dark:text-gray-300">Apply</span>
++                                            </label>
++                                        </div>
++                                    </div>
++                                </div>
++
+                                 <div>
+                                     <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-2">Internal Notes</label>
+                                     <textarea
+@@ -309,6 +381,15 @@ export default function EditBill({ bill, itemTypes = [], editors }) {
+                                 </div>
+                             )}
+ 
++                            {data.is_dealer_commission_applicable && data.dealer_id && (
++                                <div className="mb-6 p-4 rounded-xl bg-primary-50 dark:bg-primary-900/20 border border-primary-100 dark:border-primary-800">
++                                    <div className="flex justify-between items-center text-sm">
++                                        <span className="text-primary-700 dark:text-primary-300">Est. Dealer Comm.</span>
++                                        <span className="font-bold text-primary-600 dark:text-primary-400">LKR {Number(dealerCommissionAmount).toFixed(2)}</span>
++                                    </div>
++                                </div>
++                            )}
++
+                             <button
+                                 type="submit"
+                                 disabled={processing}
+diff --git a/resources/js/Pages/Studio/Bills/Index.jsx b/resources/js/Pages/Studio/Bills/Index.jsx
+index 2e79dde..99171bc 100644
+--- a/resources/js/Pages/Studio/Bills/Index.jsx
++++ b/resources/js/Pages/Studio/Bills/Index.jsx
+@@ -27,10 +27,11 @@ function StatusBadge({ status }) {
+ // ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+ // Main Bill Index Page
+ // ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+-export default function BillIndex({ bills = [], filters = {} }) {
++export default function BillIndex({ bills = [], filters = {}, dealers = [] }) {
+     const [search, setSearch] = useState(filters.search || '');
+     const [filterStatus, setFilterStatus] = useState(filters.status || '');
+     const [filterEditor, setFilterEditor] = useState(filters.editor_id || '');
++    const [filterDealer, setFilterDealer] = useState(filters.dealer_id || '');
+ 
+     // Extract unique editors from bills
+     const editors = useMemo(() => {
+@@ -55,9 +56,12 @@ export default function BillIndex({ bills = [], filters = {} }) {
+             if (filterEditor && bill.editor_id !== parseInt(filterEditor)) {
+                 return false;
+             }
++            if (filterDealer && bill.dealer_id !== parseInt(filterDealer)) {
++                return false;
++            }
+             return true;
+         });
+-    }, [bills, search, filterStatus, filterEditor]);
++    }, [bills, search, filterStatus, filterEditor, filterDealer]);
+ 
+     // Calculate summary stats
+     const stats = useMemo(() => {
+@@ -80,6 +84,7 @@ export default function BillIndex({ bills = [], filters = {} }) {
+         if (search) params.append('search', search);
+         if (filterStatus) params.append('status', filterStatus);
+         if (filterEditor) params.append('editor_id', filterEditor);
++        if (filterDealer) params.append('dealer_id', filterDealer);
+         router.get(route('studio.bills.index'), Object.fromEntries(params));
+     };
+ 
+@@ -87,6 +92,7 @@ export default function BillIndex({ bills = [], filters = {} }) {
+         setSearch('');
+         setFilterStatus('');
+         setFilterEditor('');
++        setFilterDealer('');
+         router.get(route('studio.bills.index'));
+     };
+ 
+@@ -96,6 +102,7 @@ export default function BillIndex({ bills = [], filters = {} }) {
+             'Date': bill.created_at ? new Date(bill.created_at).toLocaleDateString() : 'ΓÇö',
+             'Customer': bill.customer_name || 'ΓÇö',
+             'Editor': bill.editor?.name || 'ΓÇö',
++            'Dealer': bill.dealer?.name || 'ΓÇö',
+             'Subtotal (LKR)': Number(bill.subtotal || 0),
+             'Discount (LKR)': Number(bill.discount_amount || 0),
+             'Total (LKR)': Number(bill.after_discount || 0),
+@@ -320,6 +327,25 @@ export default function BillIndex({ bills = [], filters = {} }) {
+                             </select>
+                         </div>
+ 
++                        {/* Dealer Filter */}
++                        <div>
++                            <label className="block text-xs font-medium text-gray-700 dark:text-gray-350 mb-2">
++                                Dealer
++                            </label>
++                            <select
++                                value={filterDealer}
++                                onChange={e => setFilterDealer(e.target.value)}
++                                className="w-full px-4 py-2 rounded-lg border border-gray-200 dark:border-slate-600 bg-white dark:bg-slate-700 text-gray-900 dark:text-white text-sm"
++                            >
++                                <option value="">All Dealers</option>
++                                {dealers.map(dl => (
++                                    <option key={dl.id} value={dl.id}>
++                                        {dl.name}
++                                    </option>
++                                ))}
++                            </select>
++                        </div>
++
+                         {/* Filter Actions */}
+                         <div className="flex gap-2 items-end">
+                             <button
+@@ -374,6 +400,9 @@ export default function BillIndex({ bills = [], filters = {} }) {
+                                         <th className="px-6 py-4 text-left font-bold text-gray-900 dark:text-white">
+                                             Editor
+                                         </th>
++                                        <th className="px-6 py-4 text-left font-bold text-gray-900 dark:text-white">
++                                            Dealer
++                                        </th>
+                                         <th className="px-6 py-4 text-left font-bold text-gray-900 dark:text-white">
+                                             Actions
+                                         </th>
+@@ -417,6 +446,11 @@ export default function BillIndex({ bills = [], filters = {} }) {
+                                                     {bill.editor?.name || 'ΓÇö'}
+                                                 </span>
+                                             </td>
++                                            <td className="px-6 py-4">
++                                                <span className="text-gray-600 dark:text-gray-405">
++                                                    {bill.dealer?.name || 'ΓÇö'}
++                                                </span>
++                                            </td>
+                                             <td className="px-6 py-4">
+                                                 <div className="flex gap-2">
+                                                     {/* View */}
+diff --git a/resources/js/Pages/Studio/POS/Index.jsx b/resources/js/Pages/Studio/POS/Index.jsx
+index d3f96d5..05e6b49 100644
+--- a/resources/js/Pages/Studio/POS/Index.jsx
++++ b/resources/js/Pages/Studio/POS/Index.jsx
+@@ -106,6 +106,7 @@ export default function POSIndex({
+     packages = [],
+     itemTypes = [],
+     editors = [],
++    dealers = [],
+     frontOfficers = [],
+     customers = [],
+     recentBills = [],
+@@ -221,6 +222,9 @@ export default function POSIndex({
+     const [selectedEditorId, setSelectedEditorId] = useState('');
+     const [commissionPct, setCommissionPct] = useState('');
+     const [applyCommission, setApplyCommission] = useState(true);
++    const [selectedDealerId, setSelectedDealerId] = useState('');
++    const [dealerCommissionPct, setDealerCommissionPct] = useState('');
++    const [applyDealerCommission, setApplyDealerCommission] = useState(true);
+     const [paymentMethod, setPaymentMethod] = useState('cash');
+     const [advancePaymentMethod, setAdvancePaymentMethod] = useState('cash');
+     const [referenceNumber, setReferenceNumber] = useState('');
+@@ -590,6 +594,22 @@ export default function POSIndex({
+         setApplyCommission(true);
+     }, [selectedEditorId, editors]);
+ 
++    useEffect(() => {
++        if (!selectedDealerId) {
++            setDealerCommissionPct('');
++            setApplyDealerCommission(false);
++            return;
++        }
++
++        const selectedDealer = dealers.find((dealer) => String(dealer.id) === String(selectedDealerId));
++        const defaultPct = selectedDealer?.default_commission_pct != null
++            ? Number(selectedDealer.default_commission_pct)
++            : 0;
++
++        setDealerCommissionPct(defaultPct);
++        setApplyDealerCommission(true);
++    }, [selectedDealerId, dealers]);
++
+     useEffect(() => {
+         if (advanceEnabled && matchedAdvanceBill) {
+             // For settling an advance: calculate remaining balance to collect
+@@ -632,6 +652,14 @@ export default function POSIndex({
+                     setCommissionPct(matchedAdvanceBill.commission_pct);
+                 }
+             }
++
++            // Auto-fill dealer and commission
++            if (matchedAdvanceBill.dealer_id) {
++                setSelectedDealerId(String(matchedAdvanceBill.dealer_id));
++                if (matchedAdvanceBill.dealer_commission_pct) {
++                    setDealerCommissionPct(matchedAdvanceBill.dealer_commission_pct);
++                }
++            }
+         }
+     }, [advanceEnabled, matchedAdvanceBill]);
+ 
+@@ -670,6 +698,15 @@ export default function POSIndex({
+         return money((Number(creationChargeTotal || 0) * Number(commissionPct || 0)) / 100);
+     }, [applyCommission, commissionPct, creationChargeTotal, selectedEditorId]);
+ 
++    const dealerCommissionableAmount = useMemo(() => {
++        return Number(manualJobsCommissionable || 0);
++    }, [manualJobsCommissionable]);
++
++    const dealerCommissionAmount = useMemo(() => {
++        if (!selectedDealerId || !applyDealerCommission) return 0;
++        return money((Number(dealerCommissionableAmount || 0) * Number(dealerCommissionPct || 0)) / 100);
++    }, [applyDealerCommission, dealerCommissionPct, dealerCommissionableAmount, selectedDealerId]);
++
+     const combinedItems = useMemo(() => {
+         const validManualRows = manualRows.filter(row => row.category_id || (row.description && row.description.trim() !== '') || Number(row.unit_price || 0) > 0);
+         return [
+@@ -814,6 +851,9 @@ export default function POSIndex({
+         setSelectedEditorId('');
+         setCommissionPct('');
+         setApplyCommission(true);
++        setSelectedDealerId('');
++        setDealerCommissionPct('');
++        setApplyDealerCommission(true);
+         setPaymentMethod('cash');
+         setAdvancePaymentMethod('cash');
+         setReferenceNumber('');
+@@ -869,6 +909,9 @@ export default function POSIndex({
+             selectedEditorId,
+             commissionPct,
+             applyCommission,
++            selectedDealerId,
++            dealerCommissionPct,
++            applyDealerCommission,
+             paymentMethod,
+             advancePaymentMethod,
+             referenceNumber,
+@@ -912,6 +955,9 @@ export default function POSIndex({
+         setSelectedEditorId(order.selectedEditorId || '');
+         setCommissionPct(order.commissionPct || '');
+         setApplyCommission(order.applyCommission ?? true);
++        setSelectedDealerId(order.selectedDealerId || '');
++        setDealerCommissionPct(order.dealerCommissionPct || '');
++        setApplyDealerCommission(order.applyDealerCommission ?? true);
+         setPaymentMethod(order.paymentMethod || 'cash');
+         setAdvancePaymentMethod(order.advancePaymentMethod || 'cash');
+         setReferenceNumber(order.referenceNumber || '');
+@@ -1138,6 +1184,13 @@ export default function POSIndex({
+             is_commission_applicable: Boolean(
+                 selectedEditorId && applyCommission && commissionableAmount > 0,
+             ),
++            dealer_id: selectedDealerId || null,
++            dealer_commission_pct: selectedDealerId && applyDealerCommission && dealerCommissionableAmount > 0
++                ? Number(dealerCommissionPct || 0)
++                : null,
++            is_dealer_commission_applicable: Boolean(
++                selectedDealerId && applyDealerCommission && dealerCommissionableAmount > 0,
++            ),
+             payment_method: advanceEnabled && matchedAdvanceBill ? 'cash' : paymentMethod,
+             reference_number: paymentMethod === 'bank_transfer' ? (referenceNumber || null) : null,
+             bank_name: paymentMethod === 'bank_transfer' ? (bankName || null) : null,
+@@ -1724,12 +1777,26 @@ export default function POSIndex({
+                                         commissionAmount={commissionAmount}
+                                         commissionLocked={!canSetCommission || commissionableAmount <= 0}
+                                         commissionEditable={canSetCommission}
++
++                                        dealers={dealers}
++                                        selectedDealerId={selectedDealerId}
++                                        dealerCommissionPct={dealerCommissionPct}
++                                        applyDealerCommission={applyDealerCommission}
++                                        dealerCommissionableAmount={dealerCommissionableAmount}
++                                        dealerCommissionAmount={dealerCommissionAmount}
++                                        dealerCommissionLocked={dealerCommissionableAmount <= 0}
++                                        dealerCommissionEditable={true}
++
+                                         onAddRow={addManualRow}
+                                         onUpdateRow={updateManualRow}
+                                         onRemoveRow={removeManualRow}
+                                         onEditorChange={setSelectedEditorId}
+                                         onCommissionPctChange={setCommissionPct}
+                                         onApplyCommissionChange={setApplyCommission}
++
++                                        onDealerChange={setSelectedDealerId}
++                                        onDealerCommissionPctChange={setDealerCommissionPct}
++                                        onApplyDealerCommissionChange={setApplyDealerCommission}
+                                     />
+                                 )}
+ 
+diff --git a/test_fail_out.txt b/test_fail_out.txt
+new file mode 100644
+index 0000000..f9808d4
+--- /dev/null
++++ b/test_fail_out.txt
+@@ -0,0 +1,70 @@
++
++   WARN  Metadata found in doc-comment for method Tests\Feature\DecimalUomStockTest::it_supports_decimal_stock_in_and_out_operations(). Metadata in doc-comments is deprecated and will no longer be supported in PHPUnit 12. Update your test code to use attributes instead.
++
++   WARN  Metadata found in doc-comment for method Tests\Feature\DecimalUomStockTest::it_validates_and_records_decimal_stock_via_controller_actions(). Metadata in doc-comments is deprecated and will no longer be supported in PHPUnit 12. Update your test code to use attributes instead.
++
++   WARN  Metadata found in doc-comment for method Tests\Feature\DecimalUomStockTest::it_successfully_records_decimal_quantities_during_pos_sales(). Metadata in doc-comments is deprecated and will no longer be supported in PHPUnit 12. Update your test code to use attributes instead.
++
++   WARN  Metadata found in doc-comment for method Tests\Feature\InvoiceInventoryTest::it_saves_product_link_attributes_on_invoice_and_does_not_affect_inventory(). Metadata in doc-comments is deprecated and will no longer be supported in PHPUnit 12. Update your test code to use attributes instead.
++
++   WARN  Metadata found in doc-comment for method Tests\Feature\InvoiceInventoryTest::it_retains_product_attributes_on_invoice_update_and_does_not_affect_inventory(). Metadata in doc-comments is deprecated and will no longer be supported in PHPUnit 12. Update your test code to use attributes instead.
++
++   WARN  Metadata found in doc-comment for method Tests\Feature\InvoiceInventoryTest::it_deducts_stock_when_invoice_created_with_status_paid(). Metadata in doc-comments is deprecated and will no longer be supported in PHPUnit 12. Update your test code to use attributes instead.
++
++   WARN  Metadata found in doc-comment for method Tests\Feature\InvoiceInventoryTest::it_deducts_stock_when_status_updated_to_partially_paid(). Metadata in doc-comments is deprecated and will no longer be supported in PHPUnit 12. Update your test code to use attributes instead.
++
++   WARN  Metadata found in doc-comment for method Tests\Feature\InvoiceInventoryTest::it_restores_stock_when_invoice_is_cancelled(). Metadata in doc-comments is deprecated and will no longer be supported in PHPUnit 12. Update your test code to use attributes instead.
++
++   WARN  Metadata found in doc-comment for method Tests\Feature\InvoiceInventoryTest::it_restores_stock_when_invoice_is_fully_refunded(). Metadata in doc-comments is deprecated and will no longer be supported in PHPUnit 12. Update your test code to use attributes instead.
++
++   WARN  Metadata found in doc-comment for method Tests\Feature\ProductReturnDeleteTest::guests_cannot_delete_returns(). Metadata in doc-comments is deprecated and will no longer be supported in PHPUnit 12. Update your test code to use attributes instead.
++
++   WARN  Metadata found in doc-comment for method Tests\Feature\ProductReturnDeleteTest::users_without_delete_permission_cannot_delete_returns(). Metadata in doc-comments is deprecated and will no longer be supported in PHPUnit 12. Update your test code to use attributes instead.
++
++   WARN  Metadata found in doc-comment for method Tests\Feature\ProductReturnDeleteTest::authorized_users_can_delete_returns_and_reverse_inventory(). Metadata in doc-comments is deprecated and will no longer be supported in PHPUnit 12. Update your test code to use attributes instead.
++
++   WARN  Metadata found in doc-comment for method Tests\Feature\QuotationInventoryTest::it_saves_product_link_attributes_on_quotation_and_does_not_affect_inventory(). Metadata in doc-comments is deprecated and will no longer be supported in PHPUnit 12. Update your test code to use attributes instead.
++
++   WARN  Metadata found in doc-comment for method Tests\Feature\QuotationInventoryTest::it_retains_product_attributes_on_update_and_does_not_affect_inventory(). Metadata in doc-comments is deprecated and will no longer be supported in PHPUnit 12. Update your test code to use attributes instead.
++
++   WARN  Metadata found in doc-comment for method Tests\Feature\QuotationInventoryTest::it_transfers_product_fields_when_converting_to_invoice_without_stock_deduction(). Metadata in doc-comments is deprecated and will no longer be supported in PHPUnit 12. Update your test code to use attributes instead.
++
++   FAIL  Tests\Feature\DealerCommissionTest
++  Γ¿» create bilΓÇª 1.23s  
++  ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ  
++   FAILED  Tests\FeΓÇª   
++  Failed asserting that a row in the table [dealer_commissions] matches the attributes {
++    "bill_id": 1,
++    "dealer_id": 2,
++    "commission_pct": 12.5,
++    "commissionable_amount": 800,
++    "commission_amt": 100,
++    "is_paid": true
++}.
++
++Found similar results: [
++    {
++        "bill_id": 1,
++        "dealer_id": 2,
++        "commission_pct": 12.5,
++        "commissionable_amount": 800,
++        "commission_amt": 100,
++        "is_paid": 0
++    }
++].
++
++  at tests\Feature\DealerCommissionTest.php:104
++    100Γûò             'subtotal' => 800.00,
++    101Γûò             'after_discount' => 800.00,
++    102Γûò         ]);
++    103Γûò 
++  Γ₧£ 104Γûò         $this->assertDatabaseHas('dealer_commissions', [
++    105Γûò             'bill_id' => $bill->id,
++    106Γûò             'dealer_id' => $this->dealer->id,
++    107Γûò             'commission_pct' => 12.50,
++    108Γûò             'commissionable_amount' => 800.00,
++
++
++  Tests:    1 failed (2 assertions)
++  Duration: 1.64s
++
+diff --git a/test_out.txt b/test_out.txt
+new file mode 100644
+index 0000000..7fdefcb
+Binary files /dev/null and b/test_out.txt differ
+diff --git a/test_out_utf8.txt b/test_out_utf8.txt
+new file mode 100644
+index 0000000..b9a6f0b
+--- /dev/null
++++ b/test_out_utf8.txt
+@@ -0,0 +1,38 @@
++
++   WARN  Metadata found in doc-comment for method Tests\Feature\DecimalUomStockTest::it_supports_decimal_stock_in_and_out_operations(). Metadata in doc-comments is deprecated and will no longer be supported in PHPUnit 12. Update your test code to use attributes instead.
++
++   WARN  Metadata found in doc-comment for method Tests\Feature\DecimalUomStockTest::it_validates_and_records_decimal_stock_via_controller_actions(). Metadata in doc-comments is deprecated and will no longer be supported in PHPUnit 12. Update your test code to use attributes instead.
++
++   WARN  Metadata found in doc-comment for method Tests\Feature\DecimalUomStockTest::it_successfully_records_decimal_quantities_during_pos_sales(). Metadata in doc-comments is deprecated and will no longer be supported in PHPUnit 12. Update your test code to use attributes instead.
++
++   WARN  Metadata found in doc-comment for method Tests\Feature\InvoiceInventoryTest::it_saves_product_link_attributes_on_invoice_and_does_not_affect_inventory(). Metadata in doc-comments is deprecated and will no longer be supported in PHPUnit 12. Update your test code to use attributes instead.
++
++   WARN  Metadata found in doc-comment for method Tests\Feature\InvoiceInventoryTest::it_retains_product_attributes_on_invoice_update_and_does_not_affect_inventory(). Metadata in doc-comments is deprecated and will no longer be supported in PHPUnit 12. Update your test code to use attributes instead.
++
++   WARN  Metadata found in doc-comment for method Tests\Feature\InvoiceInventoryTest::it_deducts_stock_when_invoice_created_with_status_paid(). Metadata in doc-comments is deprecated and will no longer be supported in PHPUnit 12. Update your test code to use attributes instead.
++
++   WARN  Metadata found in doc-comment for method Tests\Feature\InvoiceInventoryTest::it_deducts_stock_when_status_updated_to_partially_paid(). Metadata in doc-comments is deprecated and will no longer be supported in PHPUnit 12. Update your test code to use attributes instead.
++
++   WARN  Metadata found in doc-comment for method Tests\Feature\InvoiceInventoryTest::it_restores_stock_when_invoice_is_cancelled(). Metadata in doc-comments is deprecated and will no longer be supported in PHPUnit 12. Update your test code to use attributes instead.
++
++   WARN  Metadata found in doc-comment for method Tests\Feature\InvoiceInventoryTest::it_restores_stock_when_invoice_is_fully_refunded(). Metadata in doc-comments is deprecated and will no longer be supported in PHPUnit 12. Update your test code to use attributes instead.
++
++   WARN  Metadata found in doc-comment for method Tests\Feature\ProductReturnDeleteTest::guests_cannot_delete_returns(). Metadata in doc-comments is deprecated and will no longer be supported in PHPUnit 12. Update your test code to use attributes instead.
++
++   WARN  Metadata found in doc-comment for method Tests\Feature\ProductReturnDeleteTest::users_without_delete_permission_cannot_delete_returns(). Metadata in doc-comments is deprecated and will no longer be supported in PHPUnit 12. Update your test code to use attributes instead.
++
++   WARN  Metadata found in doc-comment for method Tests\Feature\ProductReturnDeleteTest::authorized_users_can_delete_returns_and_reverse_inventory(). Metadata in doc-comments is deprecated and will no longer be supported in PHPUnit 12. Update your test code to use attributes instead.
++
++   WARN  Metadata found in doc-comment for method Tests\Feature\QuotationInventoryTest::it_saves_product_link_attributes_on_quotation_and_does_not_affect_inventory(). Metadata in doc-comments is deprecated and will no longer be supported in PHPUnit 12. Update your test code to use attributes instead.
++
++   WARN  Metadata found in doc-comment for method Tests\Feature\QuotationInventoryTest::it_retains_product_attributes_on_update_and_does_not_affect_inventory(). Metadata in doc-comments is deprecated and will no longer be supported in PHPUnit 12. Update your test code to use attributes instead.
++
++   WARN  Metadata found in doc-comment for method Tests\Feature\QuotationInventoryTest::it_transfers_product_fields_when_converting_to_invoice_without_stock_deduction(). Metadata in doc-comments is deprecated and will no longer be supported in PHPUnit 12. Update your test code to use attributes instead.
++
++   PASS  Tests\Feature\DealerCommissionTest
++  Γ£ô create bilΓÇª 1.53s  
++  Γ£ô http storeΓÇª 0.20s  
++
++  Tests:    2 passed (5 assertions)
++  Duration: 2.17s
++
+diff --git a/tests/Feature/DealerCommissionTest.php b/tests/Feature/DealerCommissionTest.php
+new file mode 100644
+index 0000000..28db68a
+--- /dev/null
++++ b/tests/Feature/DealerCommissionTest.php
+@@ -0,0 +1,162 @@
++<?php
++
++namespace Tests\Feature;
++
++use App\Models\Bill;
++use App\Models\BillCategory;
++use App\Models\Employee;
++use App\Models\User;
++use App\Models\DealerCommission;
++use App\Modules\Shops\Models\Shop;
++use App\Services\BillService;
++use Illuminate\Foundation\Testing\RefreshDatabase;
++use Tests\TestCase;
++
++class DealerCommissionTest extends TestCase
++{
++    use RefreshDatabase;
++
++    private User $user;
++    private Shop $shop;
++    private Employee $cashier;
++    private Employee $dealer;
++    private BillService $billService;
++
++    protected function setUp(): void
++    {
++        parent::setUp();
++
++        $this->shop = Shop::where('slug', 'main')->first() ?? Shop::create([
++            'slug' => 'main',
++            'name' => 'Main Studio',
++            'is_default' => true,
++            'is_active' => true,
++        ]);
++
++        $this->app->instance(Shop::class, $this->shop);
++
++        $superAdminRoleId = \App\Models\Role::query()->where('slug', 'super_admin')->value('id') ?? \App\Models\Role::create([
++            'slug' => 'super_admin',
++            'name' => 'Super Admin',
++            'permissions' => [],
++        ])->id;
++
++        $this->user = User::factory()->create([
++            'last_shop_id' => $this->shop->id,
++            'role_id' => $superAdminRoleId,
++        ]);
++
++        $this->cashier = Employee::create([
++            'shop_id' => $this->shop->id,
++            'name' => 'Test Cashier',
++            'email' => 'cashier@applantics.com',
++            'role' => 'cashier',
++            'status' => 'active',
++        ]);
++
++        $this->dealer = Employee::create([
++            'shop_id' => $this->shop->id,
++            'name' => 'Test Dealer',
++            'email' => 'dealer@applantics.com',
++            'role' => 'dealer',
++            'status' => 'active',
++            'default_commission_pct' => 12.5,
++        ]);
++
++        $this->billService = app(BillService::class);
++    }
++
++    public function test_create_bill_calculates_and_stores_dealer_commission(): void
++    {
++        $category = BillCategory::create([
++            'shop_id' => $this->shop->id,
++            'name' => 'Manual Job Type 1',
++        ]);
++
++        $bill = $this->billService->createBill([
++            'created_by' => $this->cashier->id,
++            'status' => 'delivered',
++            'dealer_id' => $this->dealer->id,
++            'dealer_commission_pct' => 12.5,
++            'is_dealer_commission_applicable' => true,
++            'items' => [
++                [
++                    'category_id' => $category->id,
++                    'is_stock_item' => false,
++                    'description' => 'Custom Frame printing',
++                    'quantity' => 2,
++                    'unit_price' => 400,
++                ]
++            ],
++            'paid_amount' => 800,
++            'payment_method' => 'cash',
++        ]);
++
++        $this->assertDatabaseHas('bills', [
++            'id' => $bill->id,
++            'dealer_id' => $this->dealer->id,
++            'dealer_commission_pct' => 12.5,
++            'is_dealer_commission_applicable' => true,
++            'subtotal' => 800.00,
++            'after_discount' => 800.00,
++        ]);
++
++        $this->assertDatabaseHas('dealer_commissions', [
++            'bill_id' => $bill->id,
++            'dealer_id' => $this->dealer->id,
++            'commission_pct' => 12.50,
++            'commissionable_amount' => 800.00,
++            'commission_amt' => 100.00,
++            'is_paid' => false,
++        ]);
++    }
++
++    public function test_http_store_pos_commit_saves_dealer_commission_successfully(): void
++    {
++        $category = BillCategory::create([
++            'shop_id' => $this->shop->id,
++            'name' => 'Manual Job Column',
++        ]);
++
++        $payload = [
++            'items' => [
++                [
++                    'category_id' => $category->id,
++                    'is_stock_item' => false,
++                    'description' => 'Special Print Layout',
++                    'quantity' => 1,
++                    'unit_price' => 1000,
++                ]
++            ],
++            'dealer_id' => $this->dealer->id,
++            'dealer_commission_pct' => 8.0,
++            'is_dealer_commission_applicable' => true,
++            'discount_amount' => 0,
++            'paid_amount' => 1000,
++            'payment_method' => 'cash',
++        ];
++
++        $response = $this->actingAs($this->user)
++            ->post(route('studio.pos.commit'), $payload, [
++                'X-POS-Commit' => '1',
++            ]);
++
++        $response->assertStatus(200);
++
++        $this->assertDatabaseHas('bills', [
++            'dealer_id' => $this->dealer->id,
++            'dealer_commission_pct' => 8.00,
++            'is_dealer_commission_applicable' => true,
++            'subtotal' => 1000.00,
++            'after_discount' => 1000.00,
++        ]);
++
++        $this->assertDatabaseHas('dealer_commissions', [
++            'dealer_id' => $this->dealer->id,
++            'commission_pct' => 8.00,
++            'commissionable_amount' => 1000.00,
++            'commission_amt' => 80.00,
++            'is_paid' => true,
++        ]);
++    }
++}

@@ -1,0 +1,27 @@
+﻿
+   FAIL  Tests\Unit\PayrollCalculationTest
+  Γ¿» overtime cΓÇª 0.53s  
+  Γ£ô leave calcΓÇª 0.04s  
+  Γ£ô leave calcΓÇª 0.03s  
+  Γ£ô commissionΓÇª 0.03s  
+  ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ  
+   FAILED  Tests\UnΓÇª   
+  Failed asserting that 0.0 matches expected 15.
+
+  at tests\Unit\PayrollCalculationTest.php:54
+     50Γûò             $ledgerEntries
+     51Γûò         );
+     52Γûò 
+     53Γûò         $this->assertEquals(215, $summary['worked_hours']);
+  Γ₧£  54Γûò         $this->assertEquals(15, $summary['overtime_hours']);
+     55Γûò         $this->assertEquals(2250, $summary['overtime_pay']); // 15 * 150
+     56Γûò     }
+     57Γûò 
+     58Γûò     /**
+
+  1   tests\Unit\PayrollCalculationTest.php:54
+
+
+  Tests:    1 failed, 3 passed (17 assertions)
+  Duration: 1.02s
+

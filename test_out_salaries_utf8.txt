@@ -1,0 +1,90 @@
+﻿
+   FAIL  Tests\Feature\SalariesAccessTest
+  Γ¿» admins can accΓÇª 1.37s  
+  Γ¿» non admins onlΓÇª 0.03s  
+  Γ¿» users withoutΓÇª  0.03s  
+  Γ¿» view only roleΓÇª 0.04s  
+  ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ  
+   FAILΓÇª  QueryException   
+  SQLSTATE[HY000]: General error: 1 table users has no column named shop_id (Connection: sqlite, Database: :memory:, SQL: insert into "users" ("name", "email", "email_verified_at", "password", "remember_token", "role_id", "shop_id", "updated_at", "created_at") values (Shanie Runolfsson Jr., karianne.lubowitz@example.com, 2026-08-14 07:44:47, $2y$04$gUNn9Xv5a6sYJKP8ujyl8ORBtYVdkIRjN/zzPC79pEwb8POA1E.UC, 9zRKqt7SHc, 2, 1, 2026-08-14 07:44:47, 2026-08-14 07:44:47))
+
+  at vendor\laravel\framework\src\Illuminate\Database\Connection.php:838
+    834Γûò             $exceptionType = $this->isUniqueConstraintError($e)
+    835Γûò                 ? UniqueConstraintViolationException::class
+    836Γûò                 : QueryException::class;
+    837Γûò 
+  Γ₧£ 838Γûò             throw new $exceptionType(
+    839Γûò                 $this->getNameWithReadWriteType(),
+    840Γûò                 $query,
+    841Γûò                 $this->prepareBindings($bindings),
+    842Γûò                 $e,
+
+  1   vendor\laravel\framework\src\Illuminate\Database\Connection.php:838
+
+  2   vendor\laravel\framework\src\Illuminate\Database\Connection.php:578
+      NunoMaduro\Collision\Exceptions\TestException::("SQLSTATE[HY000]: General error: 1 table users has no column named shop_id")
+
+  ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ  
+   FAILΓÇª  QueryException   
+  SQLSTATE[HY000]: General error: 1 table users has no column named shop_id (Connection: sqlite, Database: :memory:, SQL: insert into "users" ("name", "email", "email_verified_at", "password", "remember_token", "role_id", "shop_id", "updated_at", "created_at") values (Staff One, staff1@example.com, 2026-08-14 07:44:47, $2y$04$gUNn9Xv5a6sYJKP8ujyl8ORBtYVdkIRjN/zzPC79pEwb8POA1E.UC, 5VlqrkK09z, 8, 1, 2026-08-14 07:44:47, 2026-08-14 07:44:47))
+
+  at vendor\laravel\framework\src\Illuminate\Database\Connection.php:838
+    834Γûò             $exceptionType = $this->isUniqueConstraintError($e)
+    835Γûò                 ? UniqueConstraintViolationException::class
+    836Γûò                 : QueryException::class;
+    837Γûò 
+  Γ₧£ 838Γûò             throw new $exceptionType(
+    839Γûò                 $this->getNameWithReadWriteType(),
+    840Γûò                 $query,
+    841Γûò                 $this->prepareBindings($bindings),
+    842Γûò                 $e,
+
+  1   vendor\laravel\framework\src\Illuminate\Database\Connection.php:838
+
+  2   vendor\laravel\framework\src\Illuminate\Database\Connection.php:578
+      NunoMaduro\Collision\Exceptions\TestException::("SQLSTATE[HY000]: General error: 1 table users has no column named shop_id")
+
+  ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ  
+   FAILΓÇª  QueryException   
+  SQLSTATE[HY000]: General error: 1 table users has no column named shop_id (Connection: sqlite, Database: :memory:, SQL: insert into "users" ("name", "email", "email_verified_at", "password", "remember_token", "role_id", "shop_id", "updated_at", "created_at") values (Samantha Kovacek, berenice11@example.com, 2026-08-14 07:44:47, $2y$04$gUNn9Xv5a6sYJKP8ujyl8ORBtYVdkIRjN/zzPC79pEwb8POA1E.UC, h7v2RlfdNg, 8, 1, 2026-08-14 07:44:47, 2026-08-14 07:44:47))
+
+  at vendor\laravel\framework\src\Illuminate\Database\Connection.php:838
+    834Γûò             $exceptionType = $this->isUniqueConstraintError($e)
+    835Γûò                 ? UniqueConstraintViolationException::class
+    836Γûò                 : QueryException::class;
+    837Γûò 
+  Γ₧£ 838Γûò             throw new $exceptionType(
+    839Γûò                 $this->getNameWithReadWriteType(),
+    840Γûò                 $query,
+    841Γûò                 $this->prepareBindings($bindings),
+    842Γûò                 $e,
+
+  1   vendor\laravel\framework\src\Illuminate\Database\Connection.php:838
+
+  2   vendor\laravel\framework\src\Illuminate\Database\Connection.php:578
+      NunoMaduro\Collision\Exceptions\TestException::("SQLSTATE[HY000]: General error: 1 table users has no column named shop_id")
+
+  ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ  
+   FAILΓÇª  QueryException   
+  SQLSTATE[HY000]: General error: 1 table users has no column named shop_id (Connection: sqlite, Database: :memory:, SQL: insert into "users" ("name", "email", "email_verified_at", "password", "remember_token", "role_id", "shop_id", "updated_at", "created_at") values (Dr. Rebekah Armstrong Jr., beulah18@example.com, 2026-08-14 07:44:47, $2y$04$gUNn9Xv5a6sYJKP8ujyl8ORBtYVdkIRjN/zzPC79pEwb8POA1E.UC, 4Igmrnv1WH, 8, 1, 2026-08-14 07:44:47, 2026-08-14 07:44:47))
+
+  at vendor\laravel\framework\src\Illuminate\Database\Connection.php:838
+    834Γûò             $exceptionType = $this->isUniqueConstraintError($e)
+    835Γûò                 ? UniqueConstraintViolationException::class
+    836Γûò                 : QueryException::class;
+    837Γûò 
+  Γ₧£ 838Γûò             throw new $exceptionType(
+    839Γûò                 $this->getNameWithReadWriteType(),
+    840Γûò                 $query,
+    841Γûò                 $this->prepareBindings($bindings),
+    842Γûò                 $e,
+
+  1   vendor\laravel\framework\src\Illuminate\Database\Connection.php:838
+
+  2   vendor\laravel\framework\src\Illuminate\Database\Connection.php:578
+      NunoMaduro\Collision\Exceptions\TestException::("SQLSTATE[HY000]: General error: 1 table users has no column named shop_id")
+
+
+  Tests:    4 failed (0 assertions)
+  Duration: 1.97s
+
