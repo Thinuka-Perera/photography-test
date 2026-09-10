@@ -1,0 +1,13 @@
+# Always use LF for shell scripts (prevents CRLF breaking bash on Linux/cPanel)
+*.sh text eol=lf
+
+# Always use LF for .env files
+.env* text eol=lf
+
+# Keep JS/CSS/JSON build assets in LF (they are executed on Linux)
+public/build/**/*.js text eol=lf
+public/build/**/*.css text eol=lf
+public/build/**/*.json text eol=lf
+
+# Default: auto-detect for everything else
+* text=auto

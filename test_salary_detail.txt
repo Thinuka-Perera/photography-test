@@ -1,0 +1,47 @@
+﻿
+   WARN  Metadata found in doc-comment for method Tests\Feature\InvoiceInventoryTest::it_saves_product_link_attributes_on_invoice_and_does_not_affect_inventory(). Metadata in doc-comments is deprecated and will no longer be supported in PHPUnit 12. Update your test code to use attributes instead.
+
+   WARN  Metadata found in doc-comment for method Tests\Feature\InvoiceInventoryTest::it_retains_product_attributes_on_invoice_update_and_does_not_affect_inventory(). Metadata in doc-comments is deprecated and will no longer be supported in PHPUnit 12. Update your test code to use attributes instead.
+
+   WARN  Metadata found in doc-comment for method Tests\Feature\InvoiceInventoryTest::it_deducts_stock_when_invoice_created_with_status_paid(). Metadata in doc-comments is deprecated and will no longer be supported in PHPUnit 12. Update your test code to use attributes instead.
+
+   WARN  Metadata found in doc-comment for method Tests\Feature\InvoiceInventoryTest::it_deducts_stock_when_status_updated_to_partially_paid(). Metadata in doc-comments is deprecated and will no longer be supported in PHPUnit 12. Update your test code to use attributes instead.
+
+   WARN  Metadata found in doc-comment for method Tests\Feature\InvoiceInventoryTest::it_restores_stock_when_invoice_is_cancelled(). Metadata in doc-comments is deprecated and will no longer be supported in PHPUnit 12. Update your test code to use attributes instead.
+
+   WARN  Metadata found in doc-comment for method Tests\Feature\InvoiceInventoryTest::it_restores_stock_when_invoice_is_fully_refunded(). Metadata in doc-comments is deprecated and will no longer be supported in PHPUnit 12. Update your test code to use attributes instead.
+
+   WARN  Metadata found in doc-comment for method Tests\Feature\ProductReturnDeleteTest::guests_cannot_delete_returns(). Metadata in doc-comments is deprecated and will no longer be supported in PHPUnit 12. Update your test code to use attributes instead.
+
+   WARN  Metadata found in doc-comment for method Tests\Feature\ProductReturnDeleteTest::users_without_delete_permission_cannot_delete_returns(). Metadata in doc-comments is deprecated and will no longer be supported in PHPUnit 12. Update your test code to use attributes instead.
+
+   WARN  Metadata found in doc-comment for method Tests\Feature\ProductReturnDeleteTest::authorized_users_can_delete_returns_and_reverse_inventory(). Metadata in doc-comments is deprecated and will no longer be supported in PHPUnit 12. Update your test code to use attributes instead.
+
+   WARN  Metadata found in doc-comment for method Tests\Feature\QuotationInventoryTest::it_saves_product_link_attributes_on_quotation_and_does_not_affect_inventory(). Metadata in doc-comments is deprecated and will no longer be supported in PHPUnit 12. Update your test code to use attributes instead.
+
+   WARN  Metadata found in doc-comment for method Tests\Feature\QuotationInventoryTest::it_retains_product_attributes_on_update_and_does_not_affect_inventory(). Metadata in doc-comments is deprecated and will no longer be supported in PHPUnit 12. Update your test code to use attributes instead.
+
+   WARN  Metadata found in doc-comment for method Tests\Feature\QuotationInventoryTest::it_transfers_product_fields_when_converting_to_invoice_without_stock_deduction(). Metadata in doc-comments is deprecated and will no longer be supported in PHPUnit 12. Update your test code to use attributes instead.
+
+   FAIL  Tests\Feature\CustomEntryReportTest
+  Γ¿» marking sΓÇª 0.97s  
+  ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ  
+   FAILED  Tests\FΓÇª   
+  Failed asserting that 85200.0 matches expected 80225.0.
+
+  at tests\Feature\CustomEntryReportTest.php:290
+    286Γûò         $this->assertEquals(Carbon::today()->toDateString(), $expense->expense_date->toDateString());
+    287Γûò         
+    288Γûò         $this->assertStringContainsString('Salary payment for', $expense->description);
+    289Γûò         $this->assertStringContainsString($this->employee->name, $expense->description);
+  Γ₧£ 290Γûò         $this->assertEquals(80225.00, (float) $expense->amount);
+    291Γûò     }
+    292Γûò }
+    293Γûò
+
+  1   tests\Feature\CustomEntryReportTest.php:290
+
+
+  Tests:    1 failed (8 assertions)
+  Duration: 1.19s
+

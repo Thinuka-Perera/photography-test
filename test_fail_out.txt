@@ -1,0 +1,70 @@
+
+   WARN  Metadata found in doc-comment for method Tests\Feature\DecimalUomStockTest::it_supports_decimal_stock_in_and_out_operations(). Metadata in doc-comments is deprecated and will no longer be supported in PHPUnit 12. Update your test code to use attributes instead.
+
+   WARN  Metadata found in doc-comment for method Tests\Feature\DecimalUomStockTest::it_validates_and_records_decimal_stock_via_controller_actions(). Metadata in doc-comments is deprecated and will no longer be supported in PHPUnit 12. Update your test code to use attributes instead.
+
+   WARN  Metadata found in doc-comment for method Tests\Feature\DecimalUomStockTest::it_successfully_records_decimal_quantities_during_pos_sales(). Metadata in doc-comments is deprecated and will no longer be supported in PHPUnit 12. Update your test code to use attributes instead.
+
+   WARN  Metadata found in doc-comment for method Tests\Feature\InvoiceInventoryTest::it_saves_product_link_attributes_on_invoice_and_does_not_affect_inventory(). Metadata in doc-comments is deprecated and will no longer be supported in PHPUnit 12. Update your test code to use attributes instead.
+
+   WARN  Metadata found in doc-comment for method Tests\Feature\InvoiceInventoryTest::it_retains_product_attributes_on_invoice_update_and_does_not_affect_inventory(). Metadata in doc-comments is deprecated and will no longer be supported in PHPUnit 12. Update your test code to use attributes instead.
+
+   WARN  Metadata found in doc-comment for method Tests\Feature\InvoiceInventoryTest::it_deducts_stock_when_invoice_created_with_status_paid(). Metadata in doc-comments is deprecated and will no longer be supported in PHPUnit 12. Update your test code to use attributes instead.
+
+   WARN  Metadata found in doc-comment for method Tests\Feature\InvoiceInventoryTest::it_deducts_stock_when_status_updated_to_partially_paid(). Metadata in doc-comments is deprecated and will no longer be supported in PHPUnit 12. Update your test code to use attributes instead.
+
+   WARN  Metadata found in doc-comment for method Tests\Feature\InvoiceInventoryTest::it_restores_stock_when_invoice_is_cancelled(). Metadata in doc-comments is deprecated and will no longer be supported in PHPUnit 12. Update your test code to use attributes instead.
+
+   WARN  Metadata found in doc-comment for method Tests\Feature\InvoiceInventoryTest::it_restores_stock_when_invoice_is_fully_refunded(). Metadata in doc-comments is deprecated and will no longer be supported in PHPUnit 12. Update your test code to use attributes instead.
+
+   WARN  Metadata found in doc-comment for method Tests\Feature\ProductReturnDeleteTest::guests_cannot_delete_returns(). Metadata in doc-comments is deprecated and will no longer be supported in PHPUnit 12. Update your test code to use attributes instead.
+
+   WARN  Metadata found in doc-comment for method Tests\Feature\ProductReturnDeleteTest::users_without_delete_permission_cannot_delete_returns(). Metadata in doc-comments is deprecated and will no longer be supported in PHPUnit 12. Update your test code to use attributes instead.
+
+   WARN  Metadata found in doc-comment for method Tests\Feature\ProductReturnDeleteTest::authorized_users_can_delete_returns_and_reverse_inventory(). Metadata in doc-comments is deprecated and will no longer be supported in PHPUnit 12. Update your test code to use attributes instead.
+
+   WARN  Metadata found in doc-comment for method Tests\Feature\QuotationInventoryTest::it_saves_product_link_attributes_on_quotation_and_does_not_affect_inventory(). Metadata in doc-comments is deprecated and will no longer be supported in PHPUnit 12. Update your test code to use attributes instead.
+
+   WARN  Metadata found in doc-comment for method Tests\Feature\QuotationInventoryTest::it_retains_product_attributes_on_update_and_does_not_affect_inventory(). Metadata in doc-comments is deprecated and will no longer be supported in PHPUnit 12. Update your test code to use attributes instead.
+
+   WARN  Metadata found in doc-comment for method Tests\Feature\QuotationInventoryTest::it_transfers_product_fields_when_converting_to_invoice_without_stock_deduction(). Metadata in doc-comments is deprecated and will no longer be supported in PHPUnit 12. Update your test code to use attributes instead.
+
+   FAIL  Tests\Feature\DealerCommissionTest
+  ⨯ create bil… 1.23s  
+  ───────────────────  
+   FAILED  Tests\Fe…   
+  Failed asserting that a row in the table [dealer_commissions] matches the attributes {
+    "bill_id": 1,
+    "dealer_id": 2,
+    "commission_pct": 12.5,
+    "commissionable_amount": 800,
+    "commission_amt": 100,
+    "is_paid": true
+}.
+
+Found similar results: [
+    {
+        "bill_id": 1,
+        "dealer_id": 2,
+        "commission_pct": 12.5,
+        "commissionable_amount": 800,
+        "commission_amt": 100,
+        "is_paid": 0
+    }
+].
+
+  at tests\Feature\DealerCommissionTest.php:104
+    100▕             'subtotal' => 800.00,
+    101▕             'after_discount' => 800.00,
+    102▕         ]);
+    103▕ 
+  ➜ 104▕         $this->assertDatabaseHas('dealer_commissions', [
+    105▕             'bill_id' => $bill->id,
+    106▕             'dealer_id' => $this->dealer->id,
+    107▕             'commission_pct' => 12.50,
+    108▕             'commissionable_amount' => 800.00,
+
+
+  Tests:    1 failed (2 assertions)
+  Duration: 1.64s
+

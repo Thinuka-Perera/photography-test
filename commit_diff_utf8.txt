@@ -1,0 +1,191 @@
+﻿commit 28b6c8400800b2e8d5fbd3b4a08514dde050658c
+Author: Thinuka-Perera <thinukapereraa@gmail.com>
+Date:   Fri Aug 14 12:31:02 2026 +0530
+
+    Implement the Dealer Assignment in pos and that commision calculate in the salaries page
+
+diff --git a/app/Services/BillService.php b/app/Services/BillService.php
+index 8bb21a9..b40d5b0 100644
+--- a/app/Services/BillService.php
++++ b/app/Services/BillService.php
+@@ -5,6 +5,7 @@ namespace App\Services;
+ use App\Models\Bill;
+ use App\Models\BillItem;
+ use App\Models\EditorCommission;
++use App\Models\DealerCommission;
+ use App\Contracts\InventoryServiceInterface;
+ use App\Models\Inventory;
+ use App\Models\SalaryLedgerEntry;
+@@ -157,20 +158,45 @@ class BillService
+                     }
+                 }
+ 
++                $dealerId = $data['dealer_id'] ?? null;
++                $isDealerCommissionApplicable = (bool) ($data['is_dealer_commission_applicable'] ?? true);
++
++                if ($isDealerCommissionApplicable && !empty($itemsData)) {
++                    $allNoCommission = true;
++                    foreach ($itemsData as $item) {
++                        if ($item['category_id']) {
++                            $category = \App\Models\BillCategory::query()->find($item['category_id']);
++                            if (!$category?->no_commission) {
++                                $allNoCommission = false;
++                                break;
++                            }
++                        } else {
++                            $allNoCommission = false;
++                            break;
++                        }
++                    }
++                    if ($allNoCommission) {
++                        $isDealerCommissionApplicable = false;
++                    }
++                }
++
+                 // ΓöÇΓöÇ 5. Create bill record ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+                 $shopId = $this->resolveShopId();
+ 
+-                $billPayload = [
++                 $billPayload = [
+                     'shop_id' => $shopId,
+                     'bill_number' => $this->generateBillNumber(),
+                     'status' => $data['status'] ?? 'processing',
+                     'created_by' => $data['created_by'],
+                     'editor_id' => $editorId,
++                    'dealer_id' => $dealerId,
+                     'creation_charge' => $creationCharge,
+                     'advance_ref_bill_id' => $data['advance_ref_bill_id'] ?? null,
+                     'advance_paid' => $advancePaid,
+                     'commission_pct' => $data['commission_pct'] ?? null,
++                    'dealer_commission_pct' => $data['dealer_commission_pct'] ?? null,
+                     'is_commission_applicable' => $isCommissionApplicable,
++                    'is_dealer_commission_applicable' => $isDealerCommissionApplicable,
+                     'payment_method' => $data['payment_method'] ?? 'cash',
+                     'card_ref' => $data['card_ref'] ?? null,
+                     'subtotal' => $subtotal,
+@@ -241,6 +267,14 @@ class BillService
+                     }
+                 }
+ 
++                // ΓöÇΓöÇ 7c. Create dealer commission if applicable ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
++                if ($dealerId && $isDealerCommissionApplicable && ($data['dealer_commission_pct'] ?? 0) > 0) {
++                    $commissionableForDealer = $this->calculateCommissionableAmount($bill);
++                    if ($commissionableForDealer > 0) {
++                        $this->createDealerCommissionRecord($bill, $dealerId, (float) $data['dealer_commission_pct']);
++                    }
++                }
++
+                 // ΓöÇΓöÇ 7b. Create salary allowance for creation charge ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+                 // If there is a creation charge, add it as a salary allowance (not commission)
+                 // for the assigned editor.
+@@ -526,6 +560,29 @@ class BillService
+         ]);
+     }
+ 
++    /**
++     * Create dealer commission record.
++     */
++    public function createDealerCommissionRecord(Bill $bill, int $dealerId, float $commissionPct): DealerCommission
++    {
++        $bill->loadMissing(['items.category']);
++
++        $commissionableAmount = $this->calculateCommissionableAmount($bill);
++        $commissionAmt = $this->money($commissionableAmount * $commissionPct / 100);
++
++        return DealerCommission::create([
++            'shop_id' => $bill->shop_id,
++            'bill_id' => $bill->id,
++            'dealer_id' => $dealerId,
++            'commission_date' => $bill->created_at->toDateString(),
++            'total_bill_amt' => $bill->after_discount,
++            'commissionable_amount' => $commissionableAmount,
++            'commission_pct' => $commissionPct,
++            'commission_amt' => $commissionAmt,
++            'is_paid' => false,
++        ]);
++    }
++
+     /**
+      * Update bill (status, notes, etc.) ΓÇö does NOT recalculate items.
+      * To modify items, must delete and recreate.
+@@ -692,4 +749,80 @@ class BillService
+             return $commission->fresh(['bill', 'editor', 'salaryLedgerEntry']);
+         });
+     }
++
++    /**
++     * Mark a dealer commission as paid and add to salary ledger.
++     *
++     * @param DealerCommission $commission
++     * @param int $processedBy auth()->id()
++     *
++     * @return DealerCommission Fully updated commission with ledger relationship loaded
++     * @throws \InvalidArgumentException if already paid or ledger_entry_id not null
++     * @throws \Throwable
++     */
++    public function markDealerCommissionPaid(DealerCommission $commission, int $processedBy): DealerCommission
++    {
++        return DB::transaction(function () use ($commission, $processedBy) {
++            // ΓöÇΓöÇ Guard 1: Check if already added to salary ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
++            if ($commission->is_paid || $commission->ledger_entry_id) {
++                throw new \InvalidArgumentException(
++                    'This commission has already been added to the salary ledger. ' .
++                    'It cannot be marked paid again.'
++                );
++            }
++
++            // ΓöÇΓöÇ Guard 2: Require commission amount > 0 ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
++            $commissionAmt = (float) $commission->commission_amt;
++            if ($commissionAmt <= 0) {
++                throw new \InvalidArgumentException('Commission amount must be greater than zero.');
++            }
++
++            $commissionDate = $commission->commission_date instanceof Carbon
++                ? $commission->commission_date
++                : Carbon::parse($commission->commission_date);
++
++            $salaryProfile = SalaryProfile::query()
++                ->where('employee_id', $commission->dealer_id)
++                ->whereDate('month', $commissionDate->copy()->startOfMonth()->toDateString())
++                ->first();
++
++            if (!$salaryProfile) {
++                $salaryProfile = SalaryProfile::create([
++                    'employee_id' => $commission->dealer_id,
++                    'month' => $commissionDate->copy()->startOfMonth()->toDateString(),
++                    'basic_salary' => 0,
++                    'attendance_allowance' => 0,
++                    'overtime_rate' => 0,
++                    'notes' => 'Auto-created for dealer commission payment',
++                ]);
++            }
++
++            if ($salaryProfile->paid_at) {
++                throw new \InvalidArgumentException('This salary profile is already paid and the ledger is locked.');
++            }
++
++            // ΓöÇΓöÇ Step 1: Insert into salary_ledger_entries ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
++            $ledgerEntry = $salaryProfile->ledgerEntries()->create([
++                'type' => 'allowance',
++                'entry_date' => $commissionDate->toDateString(),
++                'title' => sprintf(
++                    'Dealer Commission Bill #%s (%s)',
++                    $commission->bill?->bill_number ?? 'N/A',
++                    $commission->commission_date?->format('M Y') ?? 'N/A'
++                ),
++                'amount' => $commissionAmt,
++                'notes' => sprintf('Recorded by user #%d', $processedBy),
++            ]);
++
++            // ΓöÇΓöÇ Step 2: Update dealer_commissions with ledger_entry_id ΓöÇΓöÇΓöÇ
++            $commission->update([
++                'is_paid' => true,
++                'paid_at' => now(),
++                'ledger_entry_id' => $ledgerEntry->id,
++            ]);
++
++            // ΓöÇΓöÇ Step 3: Return fully updated commission ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
++            return $commission->fresh(['bill', 'dealer', 'salaryLedgerEntry']);
++        });
++    }
+ }

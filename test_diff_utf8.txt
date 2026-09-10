@@ -1,0 +1,62 @@
+﻿diff --git a/tests/Feature/DealerCommissionTest.php b/tests/Feature/DealerCommissionTest.php
+index 28db68a..c111ccf 100644
+--- a/tests/Feature/DealerCommissionTest.php
++++ b/tests/Feature/DealerCommissionTest.php
+@@ -79,6 +79,7 @@ class DealerCommissionTest extends TestCase
+             'dealer_id' => $this->dealer->id,
+             'dealer_commission_pct' => 12.5,
+             'is_dealer_commission_applicable' => true,
++            'creation_charge' => 500.00,
+             'items' => [
+                 [
+                     'category_id' => $category->id,
+@@ -98,15 +99,16 @@ class DealerCommissionTest extends TestCase
+             'dealer_commission_pct' => 12.5,
+             'is_dealer_commission_applicable' => true,
+             'subtotal' => 800.00,
+-            'after_discount' => 800.00,
++            'creation_charge' => 500.00,
++            'after_discount' => 1300.00, // subtotal (800) + creation_charge (500)
+         ]);
+ 
+         $this->assertDatabaseHas('dealer_commissions', [
+             'bill_id' => $bill->id,
+             'dealer_id' => $this->dealer->id,
+             'commission_pct' => 12.50,
+-            'commissionable_amount' => 800.00,
+-            'commission_amt' => 100.00,
++            'commissionable_amount' => 500.00,
++            'commission_amt' => 62.50,
+             'is_paid' => false,
+         ]);
+     }
+@@ -131,8 +133,9 @@ class DealerCommissionTest extends TestCase
+             'dealer_id' => $this->dealer->id,
+             'dealer_commission_pct' => 8.0,
+             'is_dealer_commission_applicable' => true,
++            'creation_charge' => 600.00,
+             'discount_amount' => 0,
+-            'paid_amount' => 1000,
++            'paid_amount' => 1600,
+             'payment_method' => 'cash',
+         ];
+ 
+@@ -148,14 +151,15 @@ class DealerCommissionTest extends TestCase
+             'dealer_commission_pct' => 8.00,
+             'is_dealer_commission_applicable' => true,
+             'subtotal' => 1000.00,
+-            'after_discount' => 1000.00,
++            'creation_charge' => 600.00,
++            'after_discount' => 1600.00,
+         ]);
+ 
+         $this->assertDatabaseHas('dealer_commissions', [
+             'dealer_id' => $this->dealer->id,
+             'commission_pct' => 8.00,
+-            'commissionable_amount' => 1000.00,
+-            'commission_amt' => 80.00,
++            'commissionable_amount' => 600.00,
++            'commission_amt' => 48.00,
+             'is_paid' => true,
+         ]);
+     }

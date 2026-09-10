@@ -1,0 +1,63 @@
+﻿PHPUnit 11.5.55 by Sebastian Bergmann and contributors.
+
+Runtime:       PHP 8.3.30
+Configuration: D:\Applantics projects\resins-photo-frames-pos\phpunit.xml
+
+FF                                                                  2 / 2 (100%)
+
+Time: 00:01.504, Memory: 48.00 MB
+
+There were 2 failures:
+
+1) Tests\Feature\DealerCommissionTest::test_create_bill_calculates_and_stores_dealer_commission
+Failed asserting that a row in the table [bills] matches the attributes {
+    "id": 1,
+    "dealer_id": 2,
+    "dealer_commission_pct": 12.5,
+    "is_dealer_commission_applicable": true,
+    "subtotal": 800,
+    "creation_charge": 500,
+    "after_discount": 1300
+}.
+
+Found similar results: [
+    {
+        "id": 1,
+        "dealer_id": 2,
+        "dealer_commission_pct": 12.5,
+        "is_dealer_commission_applicable": 1,
+        "subtotal": 800,
+        "creation_charge": 500,
+        "after_discount": 800
+    }
+].
+
+D:\Applantics projects\resins-photo-frames-pos\vendor\laravel\framework\src\Illuminate\Foundation\Testing\Concerns\InteractsWithDatabase.php:43
+D:\Applantics projects\resins-photo-frames-pos\tests\Feature\DealerCommissionTest.php:96
+
+2) Tests\Feature\DealerCommissionTest::test_http_store_pos_commit_saves_dealer_commission_successfully
+Failed asserting that a row in the table [bills] matches the attributes {
+    "dealer_id": 2,
+    "dealer_commission_pct": 8,
+    "is_dealer_commission_applicable": true,
+    "subtotal": 1000,
+    "creation_charge": 600,
+    "after_discount": 1600
+}.
+
+Found similar results: [
+    {
+        "dealer_id": 2,
+        "dealer_commission_pct": 8,
+        "is_dealer_commission_applicable": 1,
+        "subtotal": 1000,
+        "creation_charge": 600,
+        "after_discount": 1000
+    }
+].
+
+D:\Applantics projects\resins-photo-frames-pos\vendor\laravel\framework\src\Illuminate\Foundation\Testing\Concerns\InteractsWithDatabase.php:43
+D:\Applantics projects\resins-photo-frames-pos\tests\Feature\DealerCommissionTest.php:149
+
+FAILURES!
+Tests: 2, Assertions: 3, Failures: 2.

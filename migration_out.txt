@@ -1,0 +1,5 @@
+﻿
+   INFO  Running migrations.  
+
+  2026_08_16_074319_drop_unique_bill_id_from_commissions_tables  3s DONE
+

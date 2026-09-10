@@ -1,0 +1,25 @@
+﻿
+   FAIL  Tests\Feature\UserManagementAccessTest
+  Γ£ô admins can opeΓÇª 1.81s  
+  Γ¿» cashiers cannoΓÇª 0.09s  
+  Γ£ô non admin roleΓÇª 0.05s  
+  ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ  
+   FAILED  Tests\FeaturΓÇª   
+  Expected response status code [403] but received 302.
+Failed asserting that 302 is identical to 403.
+
+  at tests\Feature\UserManagementAccessTest.php:30
+     26Γûò         $cashier = User::factory()->cashier()->create();
+     27Γûò 
+     28Γûò         $response = $this->actingAs($cashier)->get(route('users.index'));
+     29Γûò 
+  Γ₧£  30Γûò         $response->assertForbidden();
+     31Γûò     }
+     32Γûò 
+     33Γûò     public function test_non_admin_roles_cannot_receive_admin_only_pages(): void
+     34Γûò     {
+
+
+  Tests:    1 failed, 2 passed (7 assertions)
+  Duration: 2.26s
+

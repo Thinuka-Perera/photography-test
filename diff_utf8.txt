@@ -1,0 +1,202 @@
+﻿diff --git a/app/Services/BillService.php b/app/Services/BillService.php
+index b40d5b0..15f5e38 100644
+--- a/app/Services/BillService.php
++++ b/app/Services/BillService.php
+@@ -8,6 +8,7 @@ use App\Models\EditorCommission;
+ use App\Models\DealerCommission;
+ use App\Contracts\InventoryServiceInterface;
+ use App\Models\Inventory;
++use App\Models\Employee;
+ use App\Models\SalaryLedgerEntry;
+ use App\Models\SalaryProfile;
+ use App\Models\ShopSetting;
+@@ -260,67 +261,131 @@ class BillService
+                     $bill->items()->create($item);
+                 }
+ 
+-                // ΓöÇΓöÇ 7. Create editor commission if applicable ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+-                if ($editorId && $isCommissionApplicable && $data['commission_pct']) {
+-                    if ($this->resolveCommissionableAmount($bill) > 0) {
+-                        $this->createCommissionRecord($bill, $editorId, (float) $data['commission_pct']);
+-                    }
++                // ΓöÇΓöÇ 7. Create commissions and salary allowances based on creation charge rows ΓöÇΓöÇ
++                $creationChargeItems = $data['creation_charge_items'] ?? [];
++                $dealerCommissionItems = $data['dealer_commission_items'] ?? [];
++                
++                if (empty($creationChargeItems) && !empty($bill->creation_charge)) {
++                    $creationChargeItems = [
++                        [
++                            'label' => 'Creation charge',
++                            'amount' => (float) $bill->creation_charge,
++                            'editor_id' => $editorId ?? null,
++                        ]
++                    ];
+                 }
+ 
+-                // ΓöÇΓöÇ 7c. Create dealer commission if applicable ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+-                if ($dealerId && $isDealerCommissionApplicable && ($data['dealer_commission_pct'] ?? 0) > 0) {
+-                    $commissionableForDealer = $this->calculateCommissionableAmount($bill);
+-                    if ($commissionableForDealer > 0) {
+-                        $this->createDealerCommissionRecord($bill, $dealerId, (float) $data['dealer_commission_pct']);
+-                    }
++                if (empty($dealerCommissionItems) && !empty($bill->creation_charge) && $dealerId) {
++                    $dealerCommissionItems = [
++                        [
++                            'label' => 'Referral commission',
++                            'amount' => (float) $bill->creation_charge,
++                            'dealer_id' => $dealerId,
++                        ]
++                    ];
+                 }
+ 
+-                // ΓöÇΓöÇ 7b. Create salary allowance for creation charge ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+-                // If there is a creation charge, add it as a salary allowance (not commission)
+-                // for the assigned editor.
+-                if ($editorId && !empty($bill->creation_charge)) {
+-                    $periodDate = now()->startOfMonth(); // Carbon date object for consistent casting
+-
+-                    try {
+-                        $salaryProfile = SalaryProfile::query()->firstOrCreate(
+-                            [
+-                                'employee_id' => $editorId,
+-                                'month' => $periodDate,
+-                            ],
+-                            [
+-                                'basic_salary' => 0,
+-                                'attendance_allowance' => 0,
+-                                'overtime_rate' => 0,
+-                                'notes' => 'Auto-created from bill creation charges',
+-                            ]
+-                        );
+-                    } catch (\PDOException $e) {
+-                        // Handle rare race condition: another request created this profile
+-                        // between our check and insert. Just fetch the existing one.
+-                        if (str_contains($e->getMessage(), 'UNIQUE constraint failed')) {
+-                            $salaryProfile = SalaryProfile::query()
+-                                ->where('employee_id', $editorId)
+-                                ->where('month', $periodDate->toDateString())
+-                                ->first();
+-                        } else {
+-                            throw $e;
++                // Process Editors
++                foreach ($creationChargeItems as $cItem) {
++                    $cAmount = (float) ($cItem['amount'] ?? 0);
++                    if ($cAmount <= 0) {
++                        continue;
++                    }
++
++                    $cEditorId = !empty($cItem['editor_id']) ? (int) $cItem['editor_id'] : null;
++
++                    // Editor Commission
++                    if ($cEditorId && $isCommissionApplicable) {
++                        $editor = Employee::query()->find($cEditorId);
++                        if ($editor) {
++                            $commissionPct = (float) ($editor->default_commission_pct ?? 0);
++                            if ($commissionPct > 0) {
++                                EditorCommission::create([
++                                    'shop_id' => $bill->shop_id,
++                                    'bill_id' => $bill->id,
++                                    'editor_id' => $editor->id,
++                                    'commission_date' => $bill->created_at ? $bill->created_at->toDateString() : now()->toDateString(),
++                                    'total_bill_amt' => $bill->after_discount,
++                                    'commissionable_amount' => $cAmount,
++                                    'commission_pct' => $commissionPct,
++                                    'commission_amt' => $this->money($cAmount * $commissionPct / 100),
++                                    'creation_charge_amt' => $cAmount,
++                                    'is_paid' => false,
++                                    'job_description' => $cItem['label'] ?? 'Creation charge',
++                                ]);
++                            }
+                         }
+                     }
+ 
+-                    if ($salaryProfile) {
+-                        SalaryLedgerEntry::query()->updateOrCreate(
+-                            [
++                    // Editor Salary Allowance (for creation charge itself)
++                    if ($cEditorId) {
++                        $periodDate = now()->startOfMonth();
++                        try {
++                            $salaryProfile = SalaryProfile::query()->firstOrCreate(
++                                [
++                                    'employee_id' => $cEditorId,
++                                    'month' => $periodDate,
++                                ],
++                                [
++                                    'basic_salary' => 0,
++                                    'attendance_allowance' => 0,
++                                    'overtime_rate' => 0,
++                                    'notes' => 'Auto-created from bill creation charges',
++                                ]
++                            );
++                        } catch (\PDOException $e) {
++                            if (str_contains($e->getMessage(), 'UNIQUE constraint failed') || str_contains($e->getMessage(), 'Duplicate entry')) {
++                                $salaryProfile = SalaryProfile::query()
++                                    ->where('employee_id', $cEditorId)
++                                    ->where('month', $periodDate->toDateString())
++                                    ->first();
++                            } else {
++                                throw $e;
++                            }
++                        }
++
++                        if ($salaryProfile) {
++                            SalaryLedgerEntry::query()->create([
+                                 'salary_profile_id' => $salaryProfile->id,
+                                 'type' => 'allowance',
+-                                'title' => "Creation Charge {$bill->bill_number}",
+-                            ],
+-                            [
++                                'title' => "Creation Charge {$bill->bill_number} - " . ($cItem['label'] ?? 'Charge'),
+                                 'entry_date' => now()->toDateString(),
+                                 'period' => $periodDate->toDateString(),
+-                                'amount' => $bill->creation_charge,
++                                'amount' => $cAmount,
+                                 'notes' => "Creation/editing allowance for bill {$bill->bill_number}",
+-                            ]
+-                        );
++                            ]);
++                        }
++                    }
++                }
++
++                // Process Dealers
++                foreach ($dealerCommissionItems as $dItem) {
++                    $dAmount = (float) ($dItem['amount'] ?? 0);
++                    if ($dAmount <= 0) {
++                        continue;
++                    }
++
++                    $cDealerId = !empty($dItem['dealer_id']) ? (int) $dItem['dealer_id'] : null;
++
++                    // Dealer Commission
++                    if ($cDealerId && $isDealerCommissionApplicable) {
++                        $dealer = Employee::query()->find($cDealerId);
++                        if ($dealer) {
++                            $commissionPct = (float) ($dealer->default_commission_pct ?? 0);
++                            if ($commissionPct > 0) {
++                                DealerCommission::create([
++                                    'shop_id' => $bill->shop_id,
++                                    'bill_id' => $bill->id,
++                                    'dealer_id' => $dealer->id,
++                                    'commission_date' => $bill->created_at ? $bill->created_at->toDateString() : now()->toDateString(),
++                                    'total_bill_amt' => $bill->after_discount,
++                                    'commissionable_amount' => $dAmount,
++                                    'commission_pct' => $commissionPct,
++                                    'commission_amt' => $this->money($dAmount * $commissionPct / 100),
++                                    'is_paid' => false,
++                                ]);
++                            }
++                        }
+                     }
+                 }
+ 
+@@ -567,7 +632,7 @@ class BillService
+     {
+         $bill->loadMissing(['items.category']);
+ 
+-        $commissionableAmount = $this->calculateCommissionableAmount($bill);
++        $commissionableAmount = $this->money((float) ($bill->creation_charge ?? 0));
+         $commissionAmt = $this->money($commissionableAmount * $commissionPct / 100);
+ 
+         return DealerCommission::create([

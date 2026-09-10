@@ -1,0 +1,695 @@
+﻿<?php
+
+namespace App\Services;
+
+use App\Models\Bill;
+use App\Models\BillItem;
+use App\Models\EditorCommission;
+use App\Contracts\InventoryServiceInterface;
+use App\Models\Inventory;
+use App\Models\SalaryLedgerEntry;
+use App\Models\SalaryProfile;
+use App\Models\ShopSetting;
+use App\Modules\Shops\Models\Shop;
+use App\Modules\Shops\Services\ShopService;
+use Carbon\Carbon;
+use Illuminate\Database\QueryException;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Schema;
+
+class BillService
+{
+    /** bill_counters.date value for the per-shop continuous sequence (not a calendar date). */
+    private const CONTINUOUS_COUNTER_DATE = '00000000';
+
+    public function __construct(private InventoryServiceInterface $inventory)
+    {
+    }
+
+    private function money(float $value): float
+    {
+        return round($value, 2);
+    }
+
+    /**
+     * Create a new bill with items and optional commission.
+     *
+     * @param array $data {
+     *   'created_by' => int (employee_id of cashier),
+     *   'editor_id' => int|null (assigned editor),
+     *   'items' => [
+     *     {
+     *       'category_id' => int|null,
+     *       'pos_tab_id' => int|null,
+     *       'is_stock_item' => bool,
+     *       'stock_item_id' => int|null,
+     *       'description' => string,
+     *       'quantity' => float,
+     *       'unit_price' => float,
+     *     },
+     *     ...
+     *   ],
+     *   'discount_amount' => float (optional, default 0),
+     *   'commission_pct' => float|null (optional),
+     *   'is_commission_applicable' => bool (optional, default true),
+     *   'payment_method' => 'cash'|'card'|'split',
+     *   'card_ref' => string|null,
+     *   'paid_amount' => float,
+     *   'notes' => string|null,
+     * }
+     * @return Bill
+     * @throws \Throwable
+     */
+    public function createBill(array $data): Bill
+    {
+        try {
+            $attempt = 0;
+            $maxAttempts = 5;
+
+            do {
+                try {
+                    return DB::transaction(function () use ($data) {
+                        // ΓöÇΓöÇ 1. Calculate line totals and subtotal ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+                        $itemsData = [];
+                        $subtotal = 0.0;
+                        $totalLineDiscount = 0.0;
+
+                foreach ($data['items'] ?? [] as $item) {
+                    $qty = (float) ($item['quantity'] ?? $item['qty'] ?? 1);
+                    $qty = $qty > 0 ? $qty : 1;
+
+                    $price = (float) ($item['unit_price'] ?? $item['price'] ?? 0);
+                    $price = $price >= 0 ? $price : 0;
+
+                    $discType = $item['discount_type'] ?? 'amount';
+                    $discVal = (float) ($item['discount_value'] ?? 0);
+
+                    $lineRawTotal = $this->money($qty * $price);
+                    if ($discType === 'percent') {
+                        $lineDiscountAmount = $this->money(($lineRawTotal * $discVal) / 100);
+                    } else {
+                        $lineDiscountAmount = $this->money($discVal);
+                    }
+                    $lineDiscountAmount = min($lineDiscountAmount, $lineRawTotal);
+                    $lineTotal = $this->money($lineRawTotal - $lineDiscountAmount);
+
+                    $subtotal += $lineRawTotal;
+                    $totalLineDiscount += $lineDiscountAmount;
+
+                    $itemsData[] = [
+                        'category_id' => $item['category_id'] ?? null,
+                        'pos_tab_id' => $item['pos_tab_id'] ?? null,
+                        'is_stock_item' => $item['is_stock_item'] ?? false,
+                        'stock_item_id' => $item['stock_item_id'] ?? null,
+                        'description' => $item['description'],
+                        'quantity' => $qty,
+                        'unit_price' => $price,
+                        'discount_type' => $discType,
+                        'discount_value' => $discVal,
+                        'discount_amount' => $lineDiscountAmount,
+                        'line_total' => $lineTotal,
+                    ];
+                }
+
+                $subtotal = $this->money($subtotal);
+                $totalLineDiscount = $this->money($totalLineDiscount);
+
+                // ΓöÇΓöÇ 2. Apply discount ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+                $orderDiscountAmount = (float) ($data['discount_amount'] ?? 0);
+                $orderDiscountAmount = max(0, $this->money($orderDiscountAmount));
+                $discountAmount = min($subtotal, $this->money($totalLineDiscount + $orderDiscountAmount));
+
+                // Creation charge is recorded as editor salary allowance, not added to bill total.
+                // Customer pays only for the actual items.
+                $creationCharge = max(0, $this->money((float) ($data['creation_charge'] ?? 0)));
+
+                $afterDiscount = $this->money(max(0, $subtotal - $discountAmount));
+
+                // ΓöÇΓöÇ 3. Determine paid amount and balance ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+                $advancePaid = (float) ($data['advance_paid'] ?? 0);
+                $paidAmount = (float) ($data['paid_amount'] ?? $afterDiscount);
+                $paidAmount = max(0, $this->money($paidAmount));
+                $balanceDue = $this->money(max(0, $afterDiscount - ($paidAmount + $advancePaid)));
+
+                // ΓöÇΓöÇ 4. Determine commission applicability ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+                $editorId = $data['editor_id'] ?? null;
+                $isCommissionApplicable = (bool) ($data['is_commission_applicable'] ?? true);
+
+                // Check if all items are no-commission categories
+                if ($isCommissionApplicable && !empty($itemsData)) {
+                    $allNoCommission = true;
+                    foreach ($itemsData as $item) {
+                        if ($item['category_id']) {
+                            $category = \App\Models\BillCategory::query()->find($item['category_id']);
+                            if (!$category?->no_commission) {
+                                $allNoCommission = false;
+                                break;
+                            }
+                        } else {
+                            // Item without category ΓÇö assume commission applies
+                            $allNoCommission = false;
+                            break;
+                        }
+                    }
+                    if ($allNoCommission) {
+                        $isCommissionApplicable = false;
+                    }
+                }
+
+                // ΓöÇΓöÇ 5. Create bill record ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+                $shopId = $this->resolveShopId();
+
+                $billPayload = [
+                    'shop_id' => $shopId,
+                    'bill_number' => $this->generateBillNumber(),
+                    'status' => $data['status'] ?? 'processing',
+                    'created_by' => $data['created_by'],
+                    'editor_id' => $editorId,
+                    'creation_charge' => $creationCharge,
+                    'advance_ref_bill_id' => $data['advance_ref_bill_id'] ?? null,
+                    'advance_paid' => $advancePaid,
+                    'commission_pct' => $data['commission_pct'] ?? null,
+                    'is_commission_applicable' => $isCommissionApplicable,
+                    'payment_method' => $data['payment_method'] ?? 'cash',
+                    'card_ref' => $data['card_ref'] ?? null,
+                    'subtotal' => $subtotal,
+                    'discount_amount' => $discountAmount,
+                    'after_discount' => $afterDiscount,
+                    'paid_amount' => $paidAmount,
+                    'balance_due' => $balanceDue,
+                    'notes' => $data['notes'] ?? null,
+                ];
+
+                if (Schema::hasColumn('bills', 'customer_id')) {
+                    $billPayload['customer_id'] = $data['customer_id'] ?? null;
+                }
+
+                if (Schema::hasColumn('bills', 'customer_name')) {
+                    $billPayload['customer_name'] = $data['customer_name'] ?? null;
+                }
+
+                if (Schema::hasColumn('bills', 'customer_phone')) {
+                    $billPayload['customer_phone'] = $data['customer_phone'] ?? null;
+                }
+
+                if (Schema::hasColumn('bills', 'reference_number')) {
+                    $billPayload['reference_number'] = $data['reference_number'] ?? null;
+                }
+
+                if (Schema::hasColumn('bills', 'bank_name')) {
+                    $billPayload['bank_name'] = $data['bank_name'] ?? null;
+                }
+
+                if (Schema::hasColumn('bills', 'card_ref')) {
+                    $billPayload['card_ref'] = $data['card_ref'] ?? ($data['reference_number'] ?? null);
+                }
+
+                if (Schema::hasColumn('bills', 'front_officer_id')) {
+                    $billPayload['front_officer_id'] = $data['front_officer_id'] ?? null;
+                }
+
+                if (Schema::hasColumn('bills', 'advance_payment_method')) {
+                    $billPayload['advance_payment_method'] = $data['advance_payment_method'] ?? null;
+                }
+
+                $bill = Bill::create($billPayload);
+
+                // ΓöÇΓöÇ 6. Create bill items ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+                // Resolve the active shop id once for all inventory operations
+                $shopId = $this->resolveShopId();
+
+                foreach ($itemsData as $item) {
+                    if ($item['is_stock_item'] && $item['stock_item_id']) {
+                        $inventory = Inventory::query()->find($item['stock_item_id']);
+
+                        if (!$inventory) {
+                            throw new \RuntimeException("Inventory row not found for stock item #{$item['stock_item_id']}.");
+                        }
+
+                        // Correct signature: deductStock(int $shopId, int $variantId, float $qty)
+                        $this->inventory->deductStock($shopId, (int) $inventory->variant_id, (float) $item['quantity']);
+                    }
+
+                    $bill->items()->create($item);
+                }
+
+                // ΓöÇΓöÇ 7. Create editor commission if applicable ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+                if ($editorId && $isCommissionApplicable && $data['commission_pct']) {
+                    if ($this->resolveCommissionableAmount($bill) > 0) {
+                        $this->createCommissionRecord($bill, $editorId, (float) $data['commission_pct']);
+                    }
+                }
+
+                // ΓöÇΓöÇ 7b. Create salary allowance for creation charge ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+                // If there is a creation charge, add it as a salary allowance (not commission)
+                // for the assigned editor.
+                if ($editorId && !empty($bill->creation_charge)) {
+                    $periodDate = now()->startOfMonth(); // Carbon date object for consistent casting
+
+                    try {
+                        $salaryProfile = SalaryProfile::query()->firstOrCreate(
+                            [
+                                'employee_id' => $editorId,
+                                'month' => $periodDate,
+                            ],
+                            [
+                                'basic_salary' => 0,
+                                'attendance_allowance' => 0,
+                                'overtime_rate' => 0,
+                                'notes' => 'Auto-created from bill creation charges',
+                            ]
+                        );
+                    } catch (\PDOException $e) {
+                        // Handle rare race condition: another request created this profile
+                        // between our check and insert. Just fetch the existing one.
+                        if (str_contains($e->getMessage(), 'UNIQUE constraint failed')) {
+                            $salaryProfile = SalaryProfile::query()
+                                ->where('employee_id', $editorId)
+                                ->where('month', $periodDate->toDateString())
+                                ->first();
+                        } else {
+                            throw $e;
+                        }
+                    }
+
+                    if ($salaryProfile) {
+                        SalaryLedgerEntry::query()->updateOrCreate(
+                            [
+                                'salary_profile_id' => $salaryProfile->id,
+                                'type' => 'allowance',
+                                'title' => "Creation Charge {$bill->bill_number}",
+                            ],
+                            [
+                                'entry_date' => now()->toDateString(),
+                                'period' => $periodDate->toDateString(),
+                                'amount' => $bill->creation_charge,
+                                'notes' => "Creation/editing allowance for bill {$bill->bill_number}",
+                            ]
+                        );
+                    }
+                }
+
+                        return $bill->load(['items', 'commission', 'createdBy', 'editor']);
+                    });
+                } catch (QueryException $e) {
+                    if (! $this->isDuplicateBillNumberException($e) || ++$attempt >= $maxAttempts) {
+                        throw $e;
+                    }
+
+                    Log::warning('Bill number conflict detected during createBill; retrying with a new number', [
+                        'attempt' => $attempt,
+                        'message' => $e->getMessage(),
+                    ]);
+                    continue;
+                }
+            } while (true);
+        } catch (\Throwable $e) {
+            Log::error('Bill creation failed', [
+                'created_by' => $data['created_by'] ?? null,
+                'items_count' => count($data['items'] ?? []),
+                'message' => $e->getMessage(),
+            ]);
+            throw $e;
+        }
+    }
+
+    /**
+     * Build the bill-number prefix for the active shop.
+     */
+    private function buildFormattedBillPrefix(int $shopId): string
+    {
+        return $this->resolveBillPrefix($shopId);
+    }
+
+    /**
+     * Resolve a shop-specific bill prefix.
+     */
+    private function resolveBillPrefix(int $shopId): string
+    {
+        $shop = Shop::find($shopId);
+        if (!$shop) {
+            return sprintf('SH%d', $shopId);
+        }
+        return strtoupper(trim((string) $shop->bill_prefix));
+    }
+
+    /**
+     * Read the next sequence from the absolute last bill for this shop (any date).
+     */
+    private function resolveNextSequenceFromExistingBills(int $shopId): int
+    {
+        $lastNumber = Bill::query()
+            ->forShop($shopId)
+            ->orderByDesc('id')
+            ->value('bill_number');
+
+        if (! $lastNumber) {
+            return 1;
+        }
+
+        if (str_contains($lastNumber, '-')) {
+            $sequence = (int) substr($lastNumber, strrpos($lastNumber, '-') + 1);
+        } else {
+            $sequence = (int) $lastNumber;
+        }
+
+        return max(1, $sequence + 1);
+    }
+
+    /**
+     * Generate next bill number (locked, used during insert).
+     */
+    public function generateBillNumber(): string
+    {
+        $shopId = $this->resolveShopId();
+        $prefix = $this->buildFormattedBillPrefix($shopId);
+
+        return DB::transaction(function () use ($prefix, $shopId) {
+            $counter = DB::table('bill_counters')
+                ->where('shop_id', $shopId)
+                ->where('date', self::CONTINUOUS_COUNTER_DATE)
+                ->lockForUpdate()
+                ->first();
+
+            if ($counter) {
+                $next = (int) $counter->next_number;
+                DB::table('bill_counters')
+                    ->where('id', $counter->id)
+                    ->update(['next_number' => $next + 1]);
+            } else {
+                // Seed from the shop's last bill (any date), then reserve the slot.
+                $next = $this->resolveNextSequenceFromExistingBills($shopId);
+
+                try {
+                    DB::table('bill_counters')->insert([
+                        'shop_id' => $shopId,
+                        'date' => self::CONTINUOUS_COUNTER_DATE,
+                        'next_number' => $next + 1,
+                        'created_at' => now(),
+                        'updated_at' => now(),
+                    ]);
+                } catch (QueryException $e) {
+                    if ($this->isDuplicateBillCounterException($e)) {
+                        $counter = DB::table('bill_counters')
+                            ->where('shop_id', $shopId)
+                            ->where('date', self::CONTINUOUS_COUNTER_DATE)
+                            ->lockForUpdate()
+                            ->first();
+
+                        if (! $counter) {
+                            throw $e;
+                        }
+
+                        $next = (int) $counter->next_number;
+                        DB::table('bill_counters')
+                            ->where('id', $counter->id)
+                            ->update(['next_number' => $next + 1]);
+                    } else {
+                        throw $e;
+                    }
+                }
+            }
+
+            if ($prefix !== '') {
+                return sprintf('%s-%04d', $prefix, $next);
+            } else {
+                return sprintf('%04d', $next);
+            }
+        });
+    }
+
+    /**
+     * Generate the next bill number without taking a row lock.
+     * Used by the Studio POS screen for display only.
+     */
+    public function generateNextBillNumber(): string
+    {
+        $shopId = $this->resolveShopId();
+        $prefix = $this->buildFormattedBillPrefix($shopId);
+
+        $counter = DB::table('bill_counters')
+            ->where('shop_id', $shopId)
+            ->where('date', self::CONTINUOUS_COUNTER_DATE)
+            ->first();
+
+        $next = $counter
+            ? (int) $counter->next_number
+            : $this->resolveNextSequenceFromExistingBills($shopId);
+
+        if ($prefix !== '') {
+            return sprintf('%s-%04d', $prefix, $next);
+        } else {
+            return sprintf('%04d', $next);
+        }
+    }
+
+    /**
+     * Commissionable base for payout: commissionable line items + creation charges.
+     */
+    public function resolveCommissionableAmount(Bill $bill): float
+    {
+        // Commission is calculated ONLY based on creation charge
+        return $this->money((float) ($bill->creation_charge ?? 0));
+    }
+
+    private function isDuplicateBillNumberException(QueryException $e): bool
+    {
+        $errorInfo = $e->errorInfo ?? [];
+        return isset($errorInfo[0], $errorInfo[1], $errorInfo[2])
+            && $errorInfo[0] === '23000'
+            && $errorInfo[1] === 1062
+            && str_contains($errorInfo[2], 'bills_bill_number_unique');
+    }
+
+    private function isDuplicateBillCounterException(QueryException $e): bool
+    {
+        $errorInfo = $e->errorInfo ?? [];
+        return isset($errorInfo[0], $errorInfo[1], $errorInfo[2])
+            && $errorInfo[0] === '23000'
+            && $errorInfo[1] === 1062
+            && str_contains($errorInfo[2], 'bill_counters')
+            && str_contains($errorInfo[2], 'shop_id')
+            && str_contains($errorInfo[2], 'date');
+    }
+
+    /**
+     * Calculate commissionable amount:
+     * = sum of bill_items where category.no_commission != true
+     */
+    private function calculateCommissionableAmount(Bill $bill): float
+    {
+        $total = 0.0;
+
+        foreach ($bill->items as $item) {
+            if ($item->is_stock_item) {
+                continue;
+            }
+
+            if ($item->category_id) {
+                $category = \App\Models\BillCategory::query()->find($item->category_id);
+                if (!$category?->no_commission) {
+                    $total += (float) $item->line_total;
+                }
+            } else {
+                // Uncategorized items count toward commission
+                $total += (float) $item->line_total;
+            }
+        }
+
+        return $this->money($total);
+    }
+
+    /**
+     * Create editor commission record.
+     */
+    public function createCommissionRecord(Bill $bill, int $editorId, float $commissionPct): EditorCommission
+    {
+        $creationCharge = $this->money((float) ($bill->creation_charge ?? 0));
+        $bill->loadMissing(['items.category']);
+
+        $commissionableAmount = $this->resolveCommissionableAmount($bill);
+        $commissionAmt = $this->money($commissionableAmount * $commissionPct / 100);
+
+        return EditorCommission::create([
+            'shop_id' => $bill->shop_id,
+            'bill_id' => $bill->id,
+            'editor_id' => $editorId,
+            'commission_date' => $bill->created_at->toDateString(),
+            'total_bill_amt' => $bill->after_discount,
+            'commissionable_amount' => $commissionableAmount,
+            'commission_pct' => $commissionPct,
+            'commission_amt' => $commissionAmt,
+            'creation_charge_amt' => $creationCharge,
+            'is_paid' => false,
+            'job_description' => null,
+        ]);
+    }
+
+    /**
+     * Update bill (status, notes, etc.) ΓÇö does NOT recalculate items.
+     * To modify items, must delete and recreate.
+     */
+    public function updateBill(Bill $bill, array $data): Bill
+    {
+        $bill->update([
+            'status' => $data['status'] ?? $bill->status,
+            'notes' => $data['notes'] ?? $bill->notes,
+        ]);
+
+        return $bill->fresh(['items', 'commission']);
+    }
+
+    /**
+     * Mark bill as ready (status = ready).
+     */
+    public function markReady(Bill $bill): Bill
+    {
+        return $this->updateBill($bill, ['status' => 'ready']);
+    }
+
+    /**
+     * Mark bill as delivered (status = delivered).
+     */
+    public function markDelivered(Bill $bill): Bill
+    {
+        return $this->updateBill($bill, ['status' => 'delivered']);
+    }
+
+    /**
+     * Get editor's commission for a given date range.
+     * Sums unpaid commissions for aggregation/reporting.
+     */
+    public function getEditorCommissionsSummary(int $editorId, string $startDate, string $endDate): array
+    {
+        $commissions = EditorCommission::byEditor($editorId)
+            ->byDateRange($startDate, $endDate)
+            ->get();
+
+        $total = 0.0;
+        $unpaid = 0.0;
+
+        foreach ($commissions as $commission) {
+            $total += (float) $commission->commission_amt;
+            if (!$commission->is_paid) {
+                $unpaid += (float) $commission->commission_amt;
+            }
+        }
+
+        return [
+            'total' => $this->money($total),
+            'unpaid' => $this->money($unpaid),
+            'count' => $commissions->count(),
+            'commissions' => $commissions,
+        ];
+    }
+
+    /**
+     * Resolve the active shop id for the current request.
+     * Falls back to the system default shop when no request-scoped shop is bound.
+     * Mirrors the behaviour in `SaleService::resolveShopId()`.
+     *
+     * @return int
+     */
+    private function resolveShopId(): int
+    {
+        if (app()->bound(Shop::class)) {
+            return (int) app(Shop::class)->id;
+        }
+
+        $default = app(ShopService::class)->getDefault();
+
+        if (!$default) {
+            throw new \RuntimeException(
+                'No active or default shop is available; cannot create a bill without a shop scope.'
+            );
+        }
+
+        return (int) $default->id;
+    }
+
+    // ΓöÇΓöÇ Mark Commission Paid (Salary Ledger Integration) ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+
+    /**
+     * Mark a commission as paid and add to salary ledger in one transaction.
+     *
+     * Steps:
+     * 1. Check ledger_entry_id IS NULL (not already added)
+     * 2. INSERT into salary_ledger_entries (type='commission', employee_id, amount, note)
+     * 3. Capture inserted ledger_entry_id
+     * 4. UPDATE editor_commissions (is_paid=true, paid_at=NOW(), ledger_entry_id)
+     * All in DB::transaction() ΓÇö if any step fails, rollback.
+     *
+     * @param EditorCommission $commission
+     * @param int $processedBy auth()->id()
+     *
+     * @return EditorCommission Fully updated commission with ledger relationship loaded
+     * @throws \InvalidArgumentException if already paid or ledger_entry_id not null
+     * @throws \Throwable
+     */
+    public function markCommissionPaid(EditorCommission $commission, int $processedBy): EditorCommission
+    {
+        return DB::transaction(function () use ($commission, $processedBy) {
+            // ΓöÇΓöÇ Guard 1: Check if already added to salary ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+            if ($commission->is_paid || $commission->ledger_entry_id) {
+                throw new \InvalidArgumentException(
+                    'This commission has already been added to the salary ledger. ' .
+                    'It cannot be marked paid again.'
+                );
+            }
+
+            // ΓöÇΓöÇ Guard 2: Require commission amount > 0 ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+            $commissionAmt = (float) $commission->commission_amt;
+            if ($commissionAmt <= 0) {
+                throw new \InvalidArgumentException('Commission amount must be greater than zero.');
+            }
+
+            $commissionDate = $commission->commission_date instanceof Carbon
+                ? $commission->commission_date
+                : Carbon::parse($commission->commission_date);
+
+            $salaryProfile = SalaryProfile::query()
+                ->where('employee_id', $commission->editor_id)
+                ->whereDate('month', $commissionDate->copy()->startOfMonth()->toDateString())
+                ->first();
+
+            if (!$salaryProfile) {
+                $salaryProfile = SalaryProfile::create([
+                    'employee_id' => $commission->editor_id,
+                    'month' => $commissionDate->copy()->startOfMonth()->toDateString(),
+                    'basic_salary' => 0,
+                    'attendance_allowance' => 0,
+                    'overtime_rate' => 0,
+                    'notes' => 'Auto-created for commission payment',
+                ]);
+            }
+
+            if ($salaryProfile->paid_at) {
+                throw new \InvalidArgumentException('This salary profile is already paid and the ledger is locked.');
+            }
+
+            // ΓöÇΓöÇ Step 1: Insert into salary_ledger_entries ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+            $ledgerEntry = $salaryProfile->ledgerEntries()->create([
+                'type' => 'allowance',
+                'entry_date' => $commissionDate->toDateString(),
+                'title' => sprintf(
+                    'Commission Bill #%s (%s)',
+                    $commission->bill?->bill_number ?? 'N/A',
+                    $commission->commission_date?->format('M Y') ?? 'N/A'
+                ),
+                'amount' => $commissionAmt,
+                'notes' => sprintf('Recorded by user #%d', $processedBy),
+            ]);
+
+            // ΓöÇΓöÇ Step 2: Update editor_commissions with ledger_entry_id ΓöÇΓöÇΓöÇ
+            $commission->update([
+                'is_paid' => true,
+                'paid_at' => now(),
+                'ledger_entry_id' => $ledgerEntry->id,
+            ]);
+
+            // ΓöÇΓöÇ Step 3: Return fully updated commission ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+            return $commission->fresh(['bill', 'editor', 'salaryLedgerEntry']);
+        });
+    }
+}
