@@ -15,15 +15,13 @@ use Illuminate\Support\Facades\Hash;
  *
  * ─── Seeded login accounts (use Email + Password on the login page) ───
  *
- * | නම / Name    | Email (login)              | Password        | Role / shop                          |
- * |--------------|----------------------------|-----------------|--------------------------------------|
- * | Super Admin  | admin@arachchi.possystem.lk  | arachchi.pos@   | super_admin — both shops             |
- * | Buddhima     | mrarachchi123@gmail.com    | 1234mr          | studio staff — Mr. Arachchi Studio   |
- * | Shashini     | mrarachchi123@gmail.com    | 5789mr          | studio staff — same email as above   |
- * | Hasini       | networkmr07@gmail.com      | Hasini@1016#    | lab staff — Digital Colour Lab       |
- * | Dilini       | networkmr07@gmail.com      | Dilini@0826.    | lab staff — same email as above      |
- *
- * Same email + different password → system picks the correct user by password.
+ * | Name           | Email (login)          | Password       | Role / shop              |
+ * |----------------|------------------------|----------------|--------------------------|
+ * | Super Admin    | admin@possystem.lk     | admin.pos@     | super_admin — both shops |
+ * | Studio Staff 1 | studio1@possystem.lk   | studio1.pos@   | studio_staff — Studio    |
+ * | Studio Staff 2 | studio2@possystem.lk   | studio2.pos@   | studio_staff — Studio    |
+ * | Lab Staff 1    | lab1@possystem.lk      | lab1.pos@      | lab_staff — Digital Lab  |
+ * | Lab Staff 2    | lab2@possystem.lk      | lab2.pos@      | lab_staff — Digital Lab  |
  *
  * Run: php artisan db:seed
  *      php artisan migrate:fresh --seed
