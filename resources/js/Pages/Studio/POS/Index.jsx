@@ -131,7 +131,7 @@ export default function POSIndex({
     shopInfo: shopInfoProp = null,
     flashedSavedBill = null,
 }) {
-    const { flash, auth, shopSettings, canSetCommission, activeShop = null } = usePage().props;
+    const { flash, auth, shopSettings, canManageCommissions = false, activeShop = null } = usePage().props;
 
     const shopInfo = useMemo(() => {
         const active = activeShop ?? {};
@@ -1555,7 +1555,9 @@ export default function POSIndex({
 
             if (e.key === 'F7' || (isAlt && key === 'e')) {
                 e.preventDefault();
-                setActiveTabId('creation');
+                if (canManageCommissions) {
+                    setActiveTabId('creation');
+                }
                 return;
             }
 
@@ -1620,7 +1622,7 @@ export default function POSIndex({
 
         window.addEventListener('keydown', handleShortcuts);
         return () => window.removeEventListener('keydown', handleShortcuts);
-    }, [savedBill, completedBillId, handleSaveBill, holdCurrentOrder, handleClearCart, completeBill, resetForm, focusScannerInput]);
+    }, [savedBill, completedBillId, handleSaveBill, holdCurrentOrder, handleClearCart, completeBill, resetForm, focusScannerInput, canManageCommissions]);
 
     if (printMode && savedBill) {
         if (printMode === 'thermal') {
@@ -2186,13 +2188,15 @@ export default function POSIndex({
                                         Custom Entry
                                     </button>
 
-                                    <button
-                                        type="button"
-                                        onClick={() => setActiveTabId('creation')}
-                                        className={`px-6 py-2.5 rounded-[1.5rem] text-[10px] font-black uppercase tracking-[0.2em] transition-all duration-300 ${activeTabId === 'creation' ? 'bg-slate-900 dark:bg-white text-white dark:text-slate-900 shadow-2xl shadow-slate-900/20' : 'text-slate-400 hover:text-slate-650 dark:hover:text-slate-300'}`}
-                                    >
-                                        Creation Charges
-                                    </button>
+                                    {canManageCommissions && (
+                                        <button
+                                            type="button"
+                                            onClick={() => setActiveTabId('creation')}
+                                            className={`px-6 py-2.5 rounded-[1.5rem] text-[10px] font-black uppercase tracking-[0.2em] transition-all duration-300 ${activeTabId === 'creation' ? 'bg-slate-900 dark:bg-white text-white dark:text-slate-900 shadow-2xl shadow-slate-900/20' : 'text-slate-400 hover:text-slate-650 dark:hover:text-slate-300'}`}
+                                        >
+                                            Creation Charges
+                                        </button>
+                                    )}
 
                                     <button
                                         type="button"
@@ -2237,8 +2241,8 @@ export default function POSIndex({
                                         applyCommission={applyCommission}
                                         commissionableAmount={commissionableAmount}
                                         commissionAmount={commissionAmount}
-                                        commissionLocked={!canSetCommission || commissionableAmount <= 0}
-                                        commissionEditable={canSetCommission}
+                                        commissionLocked={!canManageCommissions || commissionableAmount <= 0}
+                                        commissionEditable={canManageCommissions}
 
                                         dealers={dealers}
                                         selectedDealerId={selectedDealerId}
@@ -2262,7 +2266,7 @@ export default function POSIndex({
                                     />
                                 )}
 
-                                {activeTabId === 'creation' && (
+                                {activeTabId === 'creation' && canManageCommissions && (
                                     <div className="p-6">
                                         <EditorCreationChargesPanel
                                             creationCharges={creationCharges}

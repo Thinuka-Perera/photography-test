@@ -192,7 +192,7 @@ class PosController extends Controller
                 'name' => $authUser?->name ?? 'Unknown',
             ],
             'taxRate' => config('pos.tax_rate', 0),
-            'canSetCommission' => $authUser?->hasAnyRole(['admin', 'super_admin']) ?? false,
+            'canManageCommissions' => $authUser?->canAccessPage('studio-pos-commission') ?? false,
             'flashedSavedBill' => $flashedSavedBill,
         ]);
     }

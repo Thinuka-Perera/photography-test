@@ -245,31 +245,36 @@ class BillController extends Controller
                     return $item;
                 }, $validated['items']);
 
+                $canManageCommissions = $request->user()?->canAccessPage('studio-pos-commission') ?? false;
+
                 $bill = $this->billService->createBill([
                     'status' => $status,
                     'created_by' => $employeeId,
                     'items' => $items,
                     'discount_amount' => $validated['discount_amount'] ?? 0,
-                    'editor_id' => $validated['editor_id'] ?? null,
-                    // Admins can override; everyone else uses the editor default.
-                    'commission_pct' => $request->user()?->hasAnyRole(['admin', 'super_admin'])
+                    'editor_id' => $canManageCommissions ? ($validated['editor_id'] ?? null) : null,
+                    'commission_pct' => $canManageCommissions
                         ? ($validated['commission_pct'] ?? $editorCommissionPct)
-                        : $editorCommissionPct,
-                    'is_commission_applicable' => $validated['is_commission_applicable'] ?? true,
+                        : null,
+                    'is_commission_applicable' => $canManageCommissions
+                        ? ($validated['is_commission_applicable'] ?? true)
+                        : false,
 
-                    'dealer_id' => $validated['dealer_id'] ?? null,
-                    'dealer_commission_pct' => $request->user()?->hasAnyRole(['admin', 'super_admin'])
+                    'dealer_id' => $canManageCommissions ? ($validated['dealer_id'] ?? null) : null,
+                    'dealer_commission_pct' => $canManageCommissions
                         ? ($validated['dealer_commission_pct'] ?? $dealerCommissionPct)
-                        : $dealerCommissionPct,
-                    'is_dealer_commission_applicable' => $validated['is_dealer_commission_applicable'] ?? true,
+                        : null,
+                    'is_dealer_commission_applicable' => $canManageCommissions
+                        ? ($validated['is_dealer_commission_applicable'] ?? true)
+                        : false,
 
                     'payment_method' => $validated['payment_method'],
                     'customer_id' => $validated['customer_id'] ?? null,
                     'customer_name' => $validated['customer_name'] ?? null,
                     'customer_phone' => $validated['customer_phone'] ?? null,
-                    'creation_charge' => $validated['creation_charge'] ?? 0,
-                    'creation_charge_items' => $validated['creation_charge_items'] ?? null,
-                    'dealer_commission_items' => $validated['dealer_commission_items'] ?? null,
+                    'creation_charge' => $canManageCommissions ? ($validated['creation_charge'] ?? 0) : 0,
+                    'creation_charge_items' => $canManageCommissions ? ($validated['creation_charge_items'] ?? null) : null,
+                    'dealer_commission_items' => $canManageCommissions ? ($validated['dealer_commission_items'] ?? null) : null,
                     'reference_number' => $validated['reference_number'] ?? null,
                     'bank_name' => $validated['bank_name'] ?? null,
                     'front_officer_id' => $validated['front_officer_id'] ?? null,

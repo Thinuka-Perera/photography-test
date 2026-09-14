@@ -39,6 +39,14 @@ return [
             'available_actions' => ['view', 'create', 'edit', 'delete'],
         ],
         [
+            'key' => 'studio-pos-commission',
+            'label' => '  └─ Manage Commissions & Creation Charges',
+            'description' => 'Permission to manage editor commissions, dealer commissions, and creation charges in the POS.',
+            'section' => 'Store',
+            'href' => '#',
+            'available_actions' => ['view'],
+        ],
+        [
             'key' => 'sales-history',
             'label' => 'Sales History',
             'description' => 'Review past POS sales and sale details.',
@@ -261,6 +269,7 @@ return [
                 'dashboard',
                 'studio-dashboard',
                 'studio-pos',
+                'studio-pos-commission.view',
                 'sales-history',
                 'daily-sales-report',
                 'daily-sales-report-net-profit.view',
@@ -338,6 +347,7 @@ return [
             'permissions' => [
                 'dashboard',
                 'studio-pos',
+                'studio-pos-commission.view',
                 'studio-bills',
                 'sales-history',
                 'customers',
