@@ -1,12 +1,23 @@
-import { useState, useMemo } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Search } from 'lucide-react';
 import ProductCard from './ProductCard';
 
-export default function ProductGrid({ products, categories, onAddToCart, onAdd, allowOutOfStockSelection = false }) {
+export default function ProductGrid({ products, categories, onAddToCart, focusSearchTrigger, onAdd, allowOutOfStockSelection = false }) {
     const handleAdd = onAddToCart ?? onAdd;
     const [search, setSearch] = useState('');
     const [activeCategory, setActiveCategory] = useState('all');
+    const searchInputRef = useRef(null);
 
+    useEffect(() => {
+        if (focusSearchTrigger > 0) {
+            searchInputRef.current?.focus();
+
+            searchInputRef.current?.scrollIntoView({
+                behavior: 'smooth',
+                block: 'center',
+            });
+        }
+    }, [focusSearchTrigger]);
     const filtered = useMemo(() => {
         return products.filter((p) => {
             const matchesSearch =
@@ -44,6 +55,7 @@ export default function ProductGrid({ products, categories, onAddToCart, onAdd, 
                 <div className="relative group">
                     <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-300 group-focus-within:text-primary-500 transition-colors" />
                     <input
+                        ref={searchInputRef}
                         type="text"
                         placeholder="Search products by name or SKU..."
                         value={search}

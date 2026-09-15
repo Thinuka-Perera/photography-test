@@ -1,5 +1,5 @@
 import { Link } from '@inertiajs/react';
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 function formatCurrency(value) {
     return new Intl.NumberFormat('en-LK', {
@@ -29,6 +29,7 @@ export default function CartPanel({
     onCustomerSelectById,
     items = [],
     onUpdateQuantity,
+    changeQtyTrigger = 0,
     onUpdateUnitPrice,
     onUpdateDiscountMode,
     onUpdateDiscountValue,
@@ -153,6 +154,26 @@ export default function CartPanel({
 
         setLocalCreateError(result?.error || 'Failed to create customer.');
     };
+    const quantityInputRefs = useRef({});
+
+        useEffect(() => {
+            if (changeQtyTrigger <= 0 || items.length === 0) {
+                return;
+            }
+
+            // If there is only one item, focus it automatically.
+            if (items.length === 1) {
+                const input = quantityInputRefs.current[items[0].id];
+
+                input?.focus();
+                input?.select();
+
+                input?.scrollIntoView({
+                    behavior: 'smooth',
+                    block: 'center',
+                });
+            }
+    }, [changeQtyTrigger, items]);
 
     return (
         <aside className="w-full flex flex-col h-full bg-white dark:bg-slate-800 rounded-3xl border border-slate-200/60 dark:border-slate-700/50 shadow-sm overflow-hidden">
@@ -366,6 +387,11 @@ export default function CartPanel({
                                                 −
                                             </button>
                                             <input
+                                              ref={(element) => {
+                                                    if (element) {
+                                                        quantityInputRefs.current[item.id] = element;
+                                                    }
+                                                }}
                                                 type="number"
                                                 min="0"
                                                 step="0.01"

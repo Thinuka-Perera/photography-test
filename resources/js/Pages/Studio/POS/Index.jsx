@@ -13,6 +13,7 @@ import BillPrintArachchiTemplate from '@/Components/Bills/BillPrintArachchiTempl
 import HeldOrdersModal from '@/Components/POS/HeldOrdersModal';
 import StockTab from '@/Components/POS/StockTab';
 import PackagesTab from '@/Components/POS/PackagesTab';
+import QuickActionToolbar from "@/Components/POS/QuickActionToolbar";
 
 function makeManualRow(billCategories = []) {
     return {
@@ -184,9 +185,11 @@ export default function POSIndex({
     const [stockRows, setStockRows] = useState([]);
     const [barcodeInput, setBarcodeInput] = useState('');
     const barcodeInputRef = useRef(null);
+    const productSearchInputRef = useRef(null);
     const lastScanTimeRef = useRef(0);
     const lastScanCodeRef = useRef('');
-
+    const [productSearchFocusTrigger, setProductSearchFocusTrigger] = useState(0);
+    
     const playFeedbackSound = (isSuccess) => {
         try {
             const AudioContextClass = window.AudioContext || window.webkitAudioContext;
@@ -267,6 +270,7 @@ export default function POSIndex({
     const [printMode, setPrintMode] = useState(null);
     const [saving, setSaving] = useState(false);
     const [errors, setErrors] = useState({});
+    const [changeQtyTrigger, setChangeQtyTrigger] = useState(0);
     const [statusMessage, setStatusMessage] = useState({ type: '', text: '' });
     const [creationCharges, setCreationCharges] = useState([
         { id: `creation-${Date.now()}`, label: 'Creation charge', amount: 0 },
@@ -1641,11 +1645,57 @@ export default function POSIndex({
             <Head title="POS" />
 
             <div className="max-w-[1600px] mx-auto space-y-8 animate-in fade-in duration-500">
-                {/* Header Actions */}
-                <div className="flex flex-col md:flex-row items-center justify-between gap-6 bg-white dark:bg-slate-900 p-6 rounded-[2.5rem] border border-slate-200/60 dark:border-slate-800 shadow-sm shadow-slate-200/20">
-                    <div className="flex items-center gap-5">
-                        <div className="p-3.5 rounded-3xl bg-primary-500/10 text-primary-600 dark:text-primary-400">
-                            <ReceiptText className="w-7 h-7" />
+               
+               {/* NEW POS QUICK ACTION TOOLBAR */}
+                <QuickActionToolbar
+                    onChangeQty={() => {
+                        if (combinedItems.length === 0) {
+                            window.alert('Add an item to the cart first.');
+                            return;
+                        }
+
+                        setChangeQtyTrigger((current) => current + 1);
+                    }}
+                    onNewTransaction={() => {
+                        const hasActiveTransaction =
+                            cart.length > 0 ||
+                            selectedCustomer ||
+                            discountValue > 0;
+
+                        if (hasActiveTransaction) {
+                            const confirmed = window.confirm(
+                                "You have an active transaction. Start a new transaction? Current unsaved details will be cleared."
+                            );
+
+                            if (!confirmed) {
+                                return;
+                            }
+                        }
+
+                        resetForm();
+                    }}
+
+                    onScanItems={() => {
+                        barcodeInputRef.current?.focus();
+                    }}
+
+                    onFindItem={() => {
+                        setActiveTabId('inventory');
+                    }}
+
+                    onHoldTransaction={() => {
+                        holdCurrentOrder();
+                    }}
+
+                    onLoadTransaction={() => {
+                        setShowHeldOrdersModal(true);
+                    }}
+                />
+              {/* Header Actions */}
+              <div className="flex flex-col md:flex-row items-center justify-between gap-6 bg-white dark:bg-slate-900 p-6 rounded-[2.5rem] border border-slate-200/60 dark:border-slate-800 shadow-sm shadow-slate-200/20">
+                  <div className="flex items-center gap-5">
+                      <div className="p-3.5 rounded-3xl bg-primary-500/10 text-primary-600 dark:text-primary-400">
+                          <ReceiptText className="w-7 h-7" />
                         </div>
                         <div>
                             <h1 className="text-2xl font-black text-slate-900 dark:text-white tracking-tight">Transaction</h1>
@@ -2287,6 +2337,7 @@ export default function POSIndex({
                                             products={products}
                                             categories={categories}
                                             onAddToCart={handleProductSelect}
+                                              focusSearchTrigger={productSearchFocusTrigger}
                                         />
                                     </div>
                                 )}
@@ -2359,6 +2410,7 @@ export default function POSIndex({
                             customerOptions={customerOptions}
                             selectedCustomer={selectedCustomer}
                             selectedCustomerId={selectedCustomerId}
+                            changeQtyTrigger={changeQtyTrigger}
                             onBillDateChange={setBillDate}
                             onCustomerNameChange={setCustomerName}
                             onCustomerPhoneChange={setCustomerPhone}
