@@ -15,6 +15,7 @@ export default {
         extend: {
             fontFamily: {
                 sans: ["Inter", "Figtree", ...defaultTheme.fontFamily.sans],
+                mono: ["JetBrains Mono", ...defaultTheme.fontFamily.mono],
             },
             colors: {
                 // Light mode colors
@@ -59,6 +60,14 @@ export default {
                     50: "#FFFBEB",
                     500: "#F59E0B",
                     600: "#D97706",
+                },
+                // Accent (NovaSpark Spark Orange) — highlights, active badges, alerts
+                accent: {
+                    50: "#FFF7ED",
+                    100: "#FFEDD5",
+                    500: "#F97316",
+                    600: "#EA580C",
+                    700: "#C2410C",
                 },
             },
         },

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Head, Link, router, usePage } from '@inertiajs/react';
-import MainLayout from '@/Layouts/MainLayout';
+import PosTerminalLayout from '@/Layouts/PosTerminalLayout';
 import { Printer, Eye, CheckCircle2, PencilLine, Plus, ReceiptText, BarChart3, AlertCircle, MessageCircle, Download, Clock, Barcode, Keyboard } from 'lucide-react';
 import Modal from '@/Components/Modal';
 import ManualEntryTab from '@/Components/POS/ManualEntryTab';
@@ -1639,10 +1639,10 @@ export default function POSIndex({
     }
 
     return (
-        <MainLayout pageTitle="POS">
+        <PosTerminalLayout title="Point of Sale" subtitle={`Terminal Session: ${nextBillNo}`}>
             <Head title="POS" />
 
-            <div className="max-w-[1600px] mx-auto space-y-8 animate-in fade-in duration-500">
+            <div className="max-w-[1600px] mx-auto p-6 space-y-8 animate-in fade-in duration-500">
                 {/* Header Actions */}
                 <div className="flex flex-col md:flex-row items-center justify-between gap-6 bg-white dark:bg-slate-900 p-6 rounded-[2.5rem] border border-slate-200/60 dark:border-slate-800 shadow-sm shadow-slate-200/20">
                     <div className="flex items-center gap-5">
@@ -2501,6 +2501,6 @@ export default function POSIndex({
                     </div>
                 </div>
             </div>
-        </MainLayout>
+        </PosTerminalLayout>
     );
 }
