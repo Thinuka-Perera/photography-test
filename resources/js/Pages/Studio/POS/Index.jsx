@@ -1642,9 +1642,9 @@ export default function POSIndex({
         <PosTerminalLayout title="Point of Sale" subtitle={`Terminal Session: ${nextBillNo}`}>
             <Head title="POS" />
 
-            <div className="max-w-[1600px] mx-auto p-6 space-y-8 animate-in fade-in duration-500">
+            <div className="flex h-full flex-col min-h-0 gap-4 p-4 animate-in fade-in duration-500">
                 {/* Header Actions */}
-                <div className="flex flex-col md:flex-row items-center justify-between gap-6 bg-white dark:bg-slate-900 p-6 rounded-[2.5rem] border border-slate-200/60 dark:border-slate-800 shadow-sm shadow-slate-200/20">
+                <div className="shrink-0 flex flex-col md:flex-row items-center justify-between gap-6 bg-white dark:bg-slate-900 p-6 rounded-[2.5rem] border border-slate-200/60 dark:border-slate-800 shadow-sm shadow-slate-200/20">
                     <div className="flex items-center gap-5">
                         <div className="p-3.5 rounded-3xl bg-primary-500/10 text-primary-600 dark:text-primary-400">
                             <ReceiptText className="w-7 h-7" />
@@ -2071,9 +2071,9 @@ export default function POSIndex({
                     </div>
                 </Modal>
 
-                <div className="grid grid-cols-1 xl:grid-cols-[1fr_420px] gap-8 items-start">
+                <div className="grid min-h-0 flex-1 grid-cols-1 xl:grid-cols-[1fr_420px] gap-4">
                     {/* Left Column: Transaction Interface */}
-                    <div className="space-y-8 min-w-0">
+                    <div className="flex flex-col gap-4 min-w-0 min-h-0 overflow-y-auto pr-1">
                         {/* Barcode Search/Scan Input Bar */}
                         <div className="bg-slate-900 text-white rounded-[2rem] p-6 shadow-xl border border-slate-800 flex flex-col md:flex-row items-center justify-between gap-4">
                             <div className="flex items-center gap-3">
@@ -2352,7 +2352,7 @@ export default function POSIndex({
                     </div>
 
                     {/* Right Column: Order Configuration Sidebar */}
-                    <div className="space-y-8 lg:sticky lg:top-24 pb-10">
+                    <div className="flex flex-col gap-4 min-h-0 overflow-y-auto pb-2">
                         {/* Cart Summary & Payment Panel */}
                         <CartPanel
                             billNumber={nextBillNo}

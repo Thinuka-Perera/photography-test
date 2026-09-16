@@ -168,8 +168,8 @@ export default function PosTerminalLayout({ children, title, subtitle }) {
             <ShopProvider>
                 <div className="flex h-[100dvh] w-screen flex-col overflow-hidden bg-light-bg font-sans text-light-text dark:bg-dark-bg dark:text-dark-text">
                     <TerminalChrome title={title} subtitle={subtitle} />
-
-                    <main className="min-h-0 flex-1 overflow-y-auto">
+                    
+                    <main className="min-h-0 flex-1 overflow-hidden">
                         {children}
                     </main>
 
