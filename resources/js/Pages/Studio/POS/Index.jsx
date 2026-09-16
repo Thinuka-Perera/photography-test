@@ -3,6 +3,7 @@ import { Head, Link, router, usePage } from '@inertiajs/react';
 import PosTerminalLayout from '@/Layouts/PosTerminalLayout';
 import PosActionBar from '@/Components/POS/PosActionBar';
 import PosInfoBar from '@/Components/POS/PosInfoBar';
+import PosWorkArea from '@/Components/POS/PosWorkArea';
 import { Printer, Eye, CheckCircle2, PencilLine, Plus, ReceiptText, AlertCircle, MessageCircle, Download, Barcode, Keyboard } from 'lucide-react';
 import Modal from '@/Components/Modal';
 import ManualEntryTab from '@/Components/POS/ManualEntryTab';
@@ -2037,7 +2038,7 @@ export default function POSIndex({
 
                 <div className="grid min-h-0 flex-1 grid-cols-1 xl:grid-cols-[1fr_420px] gap-4">
                     {/* Left Column: Transaction Interface */}
-                    <div className="flex flex-col gap-4 min-w-0 min-h-0 overflow-y-auto pr-1">
+                    <div className="flex flex-col gap-4 min-w-0 min-h-0">
                         
                         <PosInfoBar
                             barcodeInputRef={barcodeInputRef}
@@ -2119,8 +2120,8 @@ export default function POSIndex({
                         )}
 
                         {/* Workflow Tabs Area */}
-                        <div className="bg-white dark:bg-slate-900 rounded-[3rem] border border-slate-200/60 dark:border-slate-800 shadow-2xl shadow-slate-200/10 overflow-hidden transition-all duration-300">
-                            <div className="p-2">
+                        <PosWorkArea>
+                            <div className="min-h-0 flex-1 overflow-y-auto p-2">
                                 {activeTabId === 'manual' && (
                                     <ManualEntryTab
                                         rows={manualRows}
@@ -2176,7 +2177,7 @@ export default function POSIndex({
                                 )}
 
                                 {activeTabId === 'inventory' && (
-                                    <div className="p-4 h-[calc(100vh-220px)] min-h-[500px] flex flex-col">
+                                    <div className="p-4 h-full flex flex-col">
                                         <StockTab
                                             products={products}
                                             categories={categories}
@@ -2238,7 +2239,7 @@ export default function POSIndex({
                                     </div>
                                 )}
                             </div>
-                        </div>
+                        </PosWorkArea>
                     </div>
 
                     {/* Right Column: Order Configuration Sidebar */}

@@ -1,4 +1,4 @@
-import { Camera, Plus } from 'lucide-react';
+import { Camera } from 'lucide-react';
 
 export default function ProductCard({ product, onAdd, allowOutOfStockSelection = false }) {
     const outOfStock = product.stock === 0;
@@ -8,11 +8,11 @@ export default function ProductCard({ product, onAdd, allowOutOfStockSelection =
             onClick={() => (!outOfStock || allowOutOfStockSelection) && onAdd(product)}
             disabled={outOfStock && !allowOutOfStockSelection}
             className={`
-                group relative flex flex-col items-start p-4 rounded-3xl border text-left
-                transition-all duration-300 w-full
+                relative flex flex-col items-start p-4 rounded-3xl border text-left
+                transition-transform duration-150 w-full
                 ${outOfStock && !allowOutOfStockSelection
                     ? 'bg-slate-50 dark:bg-slate-900/50 border-slate-100 dark:border-slate-800 opacity-60 cursor-not-allowed'
-                    : 'bg-white dark:bg-slate-800 border-slate-200/60 dark:border-slate-700/50 hover:border-primary-500/50 dark:hover:border-primary-500/50 hover:shadow-xl hover:shadow-slate-200/50 dark:hover:shadow-none hover:-translate-y-1'
+                    : 'bg-white dark:bg-slate-800 border-slate-200/60 dark:border-slate-700/50 active:scale-[0.98] active:border-primary-500'
                 }
                 ${(outOfStock && allowOutOfStockSelection) ? 'opacity-80' : ''}
             `}
@@ -23,7 +23,7 @@ export default function ProductCard({ product, onAdd, allowOutOfStockSelection =
                         <img
                             src={product.image}
                             alt={product.name}
-                            className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-110"
+                            className="w-full h-full object-cover"
                             onError={(e) => {
                                 e.target.style.display = 'none';
                                 e.target.nextElementSibling.style.display = 'flex';
@@ -76,11 +76,6 @@ export default function ProductCard({ product, onAdd, allowOutOfStockSelection =
                 </div>
             </div>
 
-            <div className="absolute bottom-4 right-4 translate-y-2 opacity-0 group-hover:translate-y-0 group-hover:opacity-100 transition-all">
-                <div className="w-8 h-8 rounded-xl bg-slate-900 dark:bg-white flex items-center justify-center text-white dark:text-slate-900 shadow-xl">
-                    <Plus className="w-4 h-4" />
-                </div>
-            </div>
         </button>
     );
 }
