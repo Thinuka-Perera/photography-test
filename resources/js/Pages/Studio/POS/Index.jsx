@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Head, Link, router, usePage } from '@inertiajs/react';
 import PosTerminalLayout from '@/Layouts/PosTerminalLayout';
-import { Printer, Eye, CheckCircle2, PencilLine, Plus, ReceiptText, BarChart3, AlertCircle, MessageCircle, Download, Clock, Barcode, Keyboard } from 'lucide-react';
+import PosActionBar from '@/Components/POS/PosActionBar';
+import { Printer, Eye, CheckCircle2, PencilLine, Plus, ReceiptText, AlertCircle, MessageCircle, Download, Barcode, Keyboard } from 'lucide-react';
 import Modal from '@/Components/Modal';
 import ManualEntryTab from '@/Components/POS/ManualEntryTab';
 import CartPanel from '@/Components/POS/CartPanel';
@@ -1643,56 +1644,18 @@ export default function POSIndex({
             <Head title="POS" />
 
             <div className="flex h-full flex-col min-h-0 gap-4 p-4 animate-in fade-in duration-500">
-                {/* Header Actions */}
-                <div className="shrink-0 flex flex-col md:flex-row items-center justify-between gap-6 bg-white dark:bg-slate-900 p-6 rounded-[2.5rem] border border-slate-200/60 dark:border-slate-800 shadow-sm shadow-slate-200/20">
-                    <div className="flex items-center gap-5">
-                        <div className="p-3.5 rounded-3xl bg-primary-500/10 text-primary-600 dark:text-primary-400">
-                            <ReceiptText className="w-7 h-7" />
-                        </div>
-                        <div>
-                            <h1 className="text-2xl font-black text-slate-900 dark:text-white tracking-tight">Transaction</h1>
-                            <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mt-1">Terminal Session: {nextBillNo}</p>
-                        </div>
-                    </div>
-
-                    <div className="flex items-center gap-3">
-                        <button
-                            type="button"
-                            onClick={() => setShowShortcutsModal(true)}
-                            className="flex items-center gap-2 px-5 py-2.5 rounded-2xl bg-indigo-50 dark:bg-indigo-900/20 text-indigo-650 dark:text-indigo-400 text-xs font-bold hover:bg-indigo-100 dark:hover:bg-indigo-900/30 transition-all border border-indigo-200 dark:border-indigo-850 uppercase tracking-widest"
-                        >
-                            <Keyboard className="w-4 h-4" />
-                            Shortcuts (F1)
-                        </button>
-                        <button
-                            type="button"
-                            onClick={() => setShowHeldOrdersModal(true)}
-                            className="relative flex items-center gap-2 px-5 py-2.5 rounded-2xl bg-amber-50 dark:bg-amber-900/20 text-amber-600 dark:text-amber-400 text-xs font-bold hover:bg-amber-100 dark:hover:bg-amber-900/30 transition-all border border-amber-200 dark:border-amber-800 uppercase tracking-widest"
-                        >
-                            <Clock className="w-4 h-4" />
-                            Held
-                            {heldOrders.length > 0 && (
-                                <span className="absolute -top-2 -right-2 w-5 h-5 flex items-center justify-center rounded-full bg-amber-500 text-white text-[9px] font-black shadow-lg shadow-amber-500/30 animate-in zoom-in duration-300">
-                                    {heldOrders.length}
-                                </span>
-                            )}
-                        </button>
-                        <Link
-                            href={route('studio.sales.index')}
-                            className="flex items-center gap-2 px-5 py-2.5 rounded-2xl bg-slate-50 dark:bg-slate-800 text-slate-600 dark:text-slate-300 text-xs font-bold hover:bg-slate-100 dark:hover:bg-slate-700 transition-all border border-slate-100 dark:border-slate-700 uppercase tracking-widest"
-                        >
-                            <ReceiptText className="w-4 h-4" />
-                            History
-                        </Link>
-                        <Link
-                            href={route('reports.daily')}
-                            className="flex items-center gap-2 px-5 py-2.5 rounded-2xl bg-slate-900 dark:bg-white text-white dark:text-slate-900 text-xs font-bold hover:bg-slate-800 dark:hover:bg-slate-100 transition-all shadow-xl shadow-slate-900/10 uppercase tracking-widest"
-                        >
-                            <BarChart3 className="w-4 h-4" />
-                            Reports
-                        </Link>
-                    </div>
-                </div>
+                
+                <PosActionBar
+                    activeTabId={activeTabId}
+                    onTabChange={setActiveTabId}
+                    canManageCommissions={canManageCommissions}
+                    onNewTransaction={resetForm}
+                    onHold={holdCurrentOrder}
+                    onLoadHeld={() => setShowHeldOrdersModal(true)}
+                    heldCount={heldOrders.length}
+                    onFindItem={() => barcodeInputRef.current?.focus()}
+                    historyHref={route('studio.sales.index')}
+                />
 
                 <Modal show={Boolean(savedBill && !completedBillId)} maxWidth="2xl" onClose={() => { setSavedBill(null); setCompletedBillId(null); }}>
                     {savedBill && (
@@ -2178,58 +2141,6 @@ export default function POSIndex({
 
                         {/* Workflow Tabs Area */}
                         <div className="bg-white dark:bg-slate-900 rounded-[3rem] border border-slate-200/60 dark:border-slate-800 shadow-2xl shadow-slate-200/10 overflow-hidden transition-all duration-300">
-                            <div className="px-8 py-6 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between bg-slate-50/50 dark:bg-slate-950/20 flex-wrap gap-4">
-                                <div className="flex items-center gap-2 flex-wrap">
-                                    <button
-                                        type="button"
-                                        onClick={() => setActiveTabId('manual')}
-                                        className={`px-6 py-2.5 rounded-[1.5rem] text-[10px] font-black uppercase tracking-[0.2em] transition-all duration-300 ${activeTabId === 'manual' ? 'bg-slate-900 dark:bg-white text-white dark:text-slate-900 shadow-2xl shadow-slate-900/20' : 'text-slate-400 hover:text-slate-650 dark:hover:text-slate-300'}`}
-                                    >
-                                        Custom Entry
-                                    </button>
-
-                                    {canManageCommissions && (
-                                        <button
-                                            type="button"
-                                            onClick={() => setActiveTabId('creation')}
-                                            className={`px-6 py-2.5 rounded-[1.5rem] text-[10px] font-black uppercase tracking-[0.2em] transition-all duration-300 ${activeTabId === 'creation' ? 'bg-slate-900 dark:bg-white text-white dark:text-slate-900 shadow-2xl shadow-slate-900/20' : 'text-slate-400 hover:text-slate-650 dark:hover:text-slate-300'}`}
-                                        >
-                                            Creation Charges
-                                        </button>
-                                    )}
-
-                                    <button
-                                        type="button"
-                                        onClick={() => setActiveTabId('inventory')}
-                                        className={`px-6 py-2.5 rounded-[1.5rem] text-[10px] font-black uppercase tracking-[0.2em] transition-all duration-300 ${activeTabId === 'inventory' ? 'bg-slate-900 dark:bg-white text-white dark:text-slate-900 shadow-2xl shadow-slate-900/20' : 'text-slate-400 hover:text-slate-650 dark:hover:text-slate-300'}`}
-                                    >
-                                        Inventory Products
-                                    </button>
-
-                                    <button
-                                        type="button"
-                                        onClick={() => setActiveTabId('packages')}
-                                        className={`px-6 py-2.5 rounded-[1.5rem] text-[10px] font-black uppercase tracking-[0.2em] transition-all duration-300 ${activeTabId === 'packages' ? 'bg-slate-900 dark:bg-white text-white dark:text-slate-900 shadow-2xl shadow-slate-900/20' : 'text-slate-400 hover:text-slate-650 dark:hover:text-slate-300'}`}
-                                    >
-                                        Packages
-                                    </button>
-
-                                    <button
-                                        type="button"
-                                        onClick={() => setActiveTabId('invoices')}
-                                        className={`px-6 py-2.5 rounded-[1.5rem] text-[10px] font-black uppercase tracking-[0.2em] transition-all duration-300 ${activeTabId === 'invoices' ? 'bg-slate-900 dark:bg-white text-white dark:text-slate-900 shadow-2xl shadow-slate-900/20' : 'text-slate-400 hover:text-slate-650 dark:hover:text-slate-300'}`}
-                                    >
-                                        Manual Invoices
-                                    </button>
-                                </div>
-                                <div className="hidden md:flex items-center gap-2.5">
-                                    <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-                                    <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
-                                        Live Terminal Scoping
-                                    </span>
-                                </div>
-                            </div>
-
                             <div className="p-2">
                                 {activeTabId === 'manual' && (
                                     <ManualEntryTab
