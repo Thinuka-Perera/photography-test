@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Head, Link, router, usePage } from '@inertiajs/react';
 import PosTerminalLayout from '@/Layouts/PosTerminalLayout';
 import PosActionBar from '@/Components/POS/PosActionBar';
+import PosInfoBar from '@/Components/POS/PosInfoBar';
 import { Printer, Eye, CheckCircle2, PencilLine, Plus, ReceiptText, AlertCircle, MessageCircle, Download, Barcode, Keyboard } from 'lucide-react';
 import Modal from '@/Components/Modal';
 import ManualEntryTab from '@/Components/POS/ManualEntryTab';
@@ -2037,39 +2038,17 @@ export default function POSIndex({
                 <div className="grid min-h-0 flex-1 grid-cols-1 xl:grid-cols-[1fr_420px] gap-4">
                     {/* Left Column: Transaction Interface */}
                     <div className="flex flex-col gap-4 min-w-0 min-h-0 overflow-y-auto pr-1">
-                        {/* Barcode Search/Scan Input Bar */}
-                        <div className="bg-slate-900 text-white rounded-[2rem] p-6 shadow-xl border border-slate-800 flex flex-col md:flex-row items-center justify-between gap-4">
-                            <div className="flex items-center gap-3">
-                                <div className="w-10 h-10 rounded-xl bg-white/10 flex items-center justify-center text-primary-405">
-                                    <Barcode className="w-5 h-5 text-white/80 animate-pulse" />
-                                </div>
-                                <div>
-                                    <h4 className="text-xs font-black uppercase tracking-widest text-slate-100">
-                                        Barcode Scanner Terminal
-                                    </h4>
-                                    <p className="text-[11px] text-slate-400">
-                                        Scan barcode directly or enter SKU/barcode value below.
-                                    </p>
-                                </div>
-                            </div>
-                            <form onSubmit={handleBarcodeSearchSubmit} className="w-full md:w-auto flex items-center gap-2">
-                                <input
-                                    ref={barcodeInputRef}
-                                    type="text"
-                                    placeholder="Scan or enter barcode/SKU..."
-                                    value={barcodeInput}
-                                    onChange={(e) => setBarcodeInput(e.target.value)}
-                                    onKeyDown={handleInputKeyDown}
-                                    className="w-full md:w-64 px-4 py-2.5 rounded-xl border border-slate-700 bg-slate-950 text-xs text-white placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500 font-mono"
-                                />
-                                <button
-                                    type="submit"
-                                    className="px-4 py-2.5 bg-primary-500 hover:bg-primary-600 rounded-xl text-xs font-bold uppercase tracking-wider transition-colors"
-                                >
-                                    Add
-                                </button>
-                            </form>
-                        </div>
+                        
+                        <PosInfoBar
+                            barcodeInputRef={barcodeInputRef}
+                            barcodeInput={barcodeInput}
+                            onBarcodeInputChange={setBarcodeInput}
+                            onBarcodeSubmit={handleBarcodeSearchSubmit}
+                            onBarcodeKeyDown={handleInputKeyDown}
+                            billNumber={nextBillNo}
+                            billDate={billDate}
+                            itemCount={combinedItems.length}
+                        />
 
                         {/* Selected Invoice Banner */}
                         {loadedInvoice && (
