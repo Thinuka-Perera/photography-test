@@ -1,8 +1,20 @@
 import React, { useState, useMemo } from 'react';
 import { Search, Sparkles, Check, PackageOpen, Award, ArrowRight } from 'lucide-react';
+import PosCategoryRail from './PosCategoryRail';
 
 export default function PackagesTab({ packages = [], onAddPackage }) {
     const [search, setSearch] = useState('');
+    const [activeCategory, setActiveCategory] = useState('all');
+
+    const categories = useMemo(() => {
+        const seen = [];
+        packages.forEach((pkg) => {
+            if (pkg.category && !seen.includes(pkg.category)) {
+                seen.push(pkg.category);
+            }
+        });
+        return seen.map((cat) => ({ id: cat, name: cat }));
+    }, [packages]);
 
     const filteredPackages = useMemo(() => {
         return packages.filter((pkg) => {
@@ -12,12 +24,22 @@ export default function PackagesTab({ packages = [], onAddPackage }) {
                 (pkg.category && pkg.category.toLowerCase().includes(search.toLowerCase())) ||
                 (pkg.event_type && pkg.event_type.toLowerCase().includes(search.toLowerCase()));
 
-            return matchesSearch;
+            const matchesCategory =
+                activeCategory === 'all' || pkg.category === activeCategory;
+
+            return matchesSearch && matchesCategory;
         });
-    }, [packages, search]);
+    }, [packages, search, activeCategory]);
 
     return (
-        <div className="flex flex-col h-full bg-slate-50/30 dark:bg-slate-900/10 p-6 space-y-6">
+        <div className="flex h-full min-h-0 bg-slate-50/30 dark:bg-slate-900/10">
+            <PosCategoryRail
+                categories={categories}
+                activeCategory={activeCategory}
+                onSelect={setActiveCategory}
+            />
+
+            <div className="flex min-w-0 flex-1 flex-col p-6 space-y-6">
             <div className="relative group">
                 <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-300 group-focus-within:text-primary-500 transition-colors" />
                 <input
@@ -29,7 +51,7 @@ export default function PackagesTab({ packages = [], onAddPackage }) {
                 />
             </div>
 
-            <div className="flex-1 overflow-y-auto max-h-[500px] scrollbar-thin">
+            <div className="flex-1 min-h-0 overflow-y-auto scrollbar-thin">
                 {filteredPackages.length === 0 ? (
                     <div className="flex flex-col items-center justify-center py-20 text-slate-300 dark:text-slate-600 bg-white dark:bg-slate-800/50 rounded-3xl border-2 border-dashed border-slate-100 dark:border-slate-800">
                         <PackageOpen className="w-12 h-12 mb-4 opacity-20" />
@@ -118,6 +140,7 @@ export default function PackagesTab({ packages = [], onAddPackage }) {
                         ))}
                     </div>
                 )}
+            </div>
             </div>
         </div>
     );

@@ -4,7 +4,7 @@ import PosTerminalLayout from '@/Layouts/PosTerminalLayout';
 import PosActionBar from '@/Components/POS/PosActionBar';
 import PosInfoBar from '@/Components/POS/PosInfoBar';
 import PosWorkArea from '@/Components/POS/PosWorkArea';
-import { Printer, Eye, CheckCircle2, PencilLine, Plus, ReceiptText, AlertCircle, MessageCircle, Download, Barcode, Keyboard } from 'lucide-react';
+import { Printer, Eye, CheckCircle2, PencilLine, Plus, ReceiptText, AlertCircle, MessageCircle, Download, Barcode, Keyboard, Search, X } from 'lucide-react';
 import Modal from '@/Components/Modal';
 import ManualEntryTab from '@/Components/POS/ManualEntryTab';
 import CartPanel from '@/Components/POS/CartPanel';
@@ -15,6 +15,7 @@ import BillPrintClientFormat from '@/Components/Bills/BillPrintClientFormat';
 import BillPrintArachchiTemplate from '@/Components/Bills/BillPrintArachchiTemplate';
 import HeldOrdersModal from '@/Components/POS/HeldOrdersModal';
 import StockTab from '@/Components/POS/StockTab';
+import ProductGrid from '@/Components/POS/ProductGrid';
 import PackagesTab from '@/Components/POS/PackagesTab';
 
 function makeManualRow(billCategories = []) {
@@ -283,6 +284,7 @@ export default function POSIndex({
     const [selectedPackageForModal, setSelectedPackageForModal] = useState(null);
     const [selectedPackageProducts, setSelectedPackageProducts] = useState([]);
     const [showHeldOrdersModal, setShowHeldOrdersModal] = useState(false);
+    const [showFindModal, setShowFindModal] = useState(false);
     const [selectedProductGroup, setSelectedProductGroup] = useState(null);
     const [heldOrders, setHeldOrders] = useState(() => {
         try {
@@ -1655,9 +1657,35 @@ export default function POSIndex({
                     onHold={holdCurrentOrder}
                     onLoadHeld={() => setShowHeldOrdersModal(true)}
                     heldCount={heldOrders.length}
-                    onFindItem={() => barcodeInputRef.current?.focus()}
+                    onFindItem={() => setShowFindModal(true)}
                     historyHref={route('studio.sales.index')}
                 />
+
+                <Modal show={showFindModal} maxWidth="7xl" onClose={() => setShowFindModal(false)}>
+                    <div className="flex h-[88vh] flex-col">
+                        <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-700/50 px-6 py-4">
+                            <div className="flex items-center gap-2">
+                                <Search className="w-4 h-4 text-primary-500" />
+                                <h2 className="text-sm font-black uppercase tracking-widest text-slate-800 dark:text-white">Find Product</h2>
+                            </div>
+                            <button
+                                type="button"
+                                onClick={() => setShowFindModal(false)}
+                                className="flex min-h-[44px] min-w-[44px] items-center justify-center rounded-xl text-slate-400 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-slate-800 dark:hover:text-white transition-colors"
+                                aria-label="Close product search"
+                            >
+                                <X className="w-5 h-5" />
+                            </button>
+                        </div>
+                        <div className="min-h-0 flex-1 overflow-hidden">
+                            <ProductGrid
+                                products={products}
+                                categories={categories}
+                                onAddToCart={(product) => handleProductSelect(product)}
+                            />
+                        </div>
+                    </div>
+                </Modal>
 
                 <Modal show={Boolean(savedBill && !completedBillId)} maxWidth="2xl" onClose={() => { setSavedBill(null); setCompletedBillId(null); }}>
                     {savedBill && (
@@ -2187,7 +2215,7 @@ export default function POSIndex({
                                 )}
 
                                 {activeTabId === 'packages' && (
-                                    <div className="p-4">
+                                    <div className="p-4 h-full flex flex-col">
                                         <PackagesTab
                                             packages={packages}
                                             onAddPackage={addPackageToCart}
