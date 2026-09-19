@@ -9,14 +9,22 @@ export default function ProductGrid({ products, categories, onAddToCart, focusSe
     const searchInputRef = useRef(null);
 
     useEffect(() => {
-        if (focusSearchTrigger > 0) {
-            searchInputRef.current?.focus();
+        if (focusSearchTrigger <= 0) return;
 
-            searchInputRef.current?.scrollIntoView({
+        const timer = setTimeout(() => {
+            const input = searchInputRef.current;
+
+            if (!input) return;
+
+            input.scrollIntoView({
                 behavior: 'smooth',
                 block: 'center',
             });
-        }
+
+            input.focus();
+        }, 300);
+
+        return () => clearTimeout(timer);
     }, [focusSearchTrigger]);
     const filtered = useMemo(() => {
         return products.filter((p) => {
@@ -57,7 +65,7 @@ export default function ProductGrid({ products, categories, onAddToCart, focusSe
                     <input
                         ref={searchInputRef}
                         type="text"
-                        placeholder="Search products by name or SKU..."
+                        placeholder="Search products by name, SKU or barcode…"
                         value={search}
                         onChange={(e) => setSearch(e.target.value)}
                         className="w-full pl-11 pr-4 py-3.5 rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-sm text-slate-700 dark:text-white placeholder:text-slate-400 focus:outline-none focus:ring-4 focus:ring-primary-500/10 focus:border-primary-500 transition-all shadow-sm"
