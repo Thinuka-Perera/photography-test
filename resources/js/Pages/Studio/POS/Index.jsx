@@ -176,6 +176,27 @@ export default function POSIndex({
     }, [shopSettings, shopInfoProp, activeShop]);
 
     const [activeTabId, setActiveTabId] = useState('inventory');
+    const [isFullscreen, setIsFullscreen] = useState(false);
+
+    useEffect(() => {
+        const handleFullscreenChange = () => {
+            setIsFullscreen(!!document.fullscreenElement);
+        };
+        document.addEventListener('fullscreenchange', handleFullscreenChange);
+        return () => document.removeEventListener('fullscreenchange', handleFullscreenChange);
+    }, []);
+
+    const toggleFullscreen = () => {
+        if (!document.fullscreenElement) {
+            document.documentElement.requestFullscreen().catch(err => {
+                console.log(`Error attempting to enable full-screen mode: ${err.message}`);
+            });
+        } else {
+            if (document.exitFullscreen) {
+                document.exitFullscreen();
+            }
+        }
+    };
     const [showShortcutsModal, setShowShortcutsModal] = useState(false);
     const [manualRows, setManualRows] = useState(() => [makeManualRow(itemTypes)]);
     const [activeInvoiceId, setActiveInvoiceId] = useState(null);
@@ -189,7 +210,7 @@ export default function POSIndex({
     const lastScanTimeRef = useRef(0);
     const lastScanCodeRef = useRef('');
     const [productSearchFocusTrigger, setProductSearchFocusTrigger] = useState(0);
-    
+
     const playFeedbackSound = (isSuccess) => {
         try {
             const AudioContextClass = window.AudioContext || window.webkitAudioContext;
@@ -271,6 +292,8 @@ export default function POSIndex({
     const [saving, setSaving] = useState(false);
     const [errors, setErrors] = useState({});
     const [changeQtyTrigger, setChangeQtyTrigger] = useState(0);
+    const [changeRateTrigger, setChangeRateTrigger] = useState(0);
+    const [findItemTrigger, setFindItemTrigger] = useState(0);
     const [statusMessage, setStatusMessage] = useState({ type: '', text: '' });
     const [creationCharges, setCreationCharges] = useState([
         { id: `creation-${Date.now()}`, label: 'Creation charge', amount: 0 },
@@ -825,19 +848,15 @@ export default function POSIndex({
 
     useEffect(() => {
         focusScannerInput();
-    }, [combinedItems, focusScannerInput]);
-
-    useEffect(() => {
-        focusScannerInput();
     }, [statusMessage, errors, focusScannerInput]);
 
-    useEffect(() => {
-        const handleWindowClick = () => {
-            setTimeout(focusScannerInput, 50);
-        };
-        window.addEventListener('click', handleWindowClick);
-        return () => window.removeEventListener('click', handleWindowClick);
-    }, [focusScannerInput]);
+    // useEffect(() => {
+    //     const handleWindowClick = () => {
+    //         setTimeout(focusScannerInput, 50);
+    //     };
+    //     window.addEventListener('click', handleWindowClick);
+    //     return () => window.removeEventListener('click', handleWindowClick);
+    // }, [focusScannerInput]);
 
     const subtotal = useMemo(() => {
         return money(combinedItems.reduce((total, item) => total + Number(item.quantity || 0) * Number(item.effective_base_price || item.original_unit_price || item.unit_price || 0), 0));
@@ -1641,61 +1660,152 @@ export default function POSIndex({
     }
 
     return (
-        <MainLayout pageTitle="POS">
+        <MainLayout pageTitle="POS" isSidebarCollapsed={isFullscreen}>
             <Head title="POS" />
 
             <div className="max-w-[1600px] mx-auto space-y-8 animate-in fade-in duration-500">
-               
-               {/* NEW POS QUICK ACTION TOOLBAR */}
+
+                {/* NEW POS QUICK ACTION TOOLBAR */}
                 <QuickActionToolbar
-                    onChangeQty={() => {
+                    onChangeRate={() => {
                         if (combinedItems.length === 0) {
-                            window.alert('Add an item to the cart first.');
+                            setStatusMessage({ type: 'error', text: 'Add an item to the cart first.' });
                             return;
                         }
-
+                        setChangeRateTrigger((current) => current + 1);
+                    }}
+                    onChangeQty={() => {
+                        if (combinedItems.length === 0) {
+                            setStatusMessage({ type: 'error', text: 'Add an item to the cart first.' });
+                            return;
+                        }
                         setChangeQtyTrigger((current) => current + 1);
+                    }}
+                    onBillDiscount={() => {
+                        const discInput = document.querySelector('input[placeholder="0.00"]');
+                        if (discInput) {
+                            discInput.focus();
+                            discInput.select();
+                        }
                     }}
                     onNewTransaction={() => {
                         const hasActiveTransaction =
-                            cart.length > 0 ||
-                            selectedCustomer ||
-                            discountValue > 0;
+                            combinedItems.length > 0 ||
+                            Boolean(selectedCustomer) ||
+                            Number(discountValue || 0) > 0;
 
                         if (hasActiveTransaction) {
                             const confirmed = window.confirm(
-                                "You have an active transaction. Start a new transaction? Current unsaved details will be cleared."
+                                'You have an active transaction. Start a new transaction? Current unsaved details will be cleared.'
                             );
-
-                            if (!confirmed) {
-                                return;
-                            }
+                            if (!confirmed) return;
                         }
 
                         resetForm();
+                        setStatusMessage({ type: 'success', text: 'New transaction started.' });
+                        setTimeout(() => barcodeInputRef.current?.focus(), 100);
                     }}
-
                     onScanItems={() => {
-                        barcodeInputRef.current?.focus();
+                        focusScannerInput();
                     }}
-
+                    onProduct={() => router.visit(route('products.index'))}
                     onFindItem={() => {
                         setActiveTabId('inventory');
+                        setProductSearchFocusTrigger((current) => current + 1);
                     }}
+                    onHoldTransaction={holdCurrentOrder}
+                    onLoadTransaction={() => setShowHeldOrdersModal(true)}
+                    onBackOffice={() => router.visit(route('studio.dashboard'))}
+                    onBillReprint={() => router.visit(route('studio.sales.index'))}
+                    onCreditCustomer={() => {
+                        setPaymentMethod('credit');
+                        setStatusMessage({
+                            type: 'success',
+                            text: 'Credit payment selected. Please select a customer.',
+                        });
+                        setTimeout(() => {
+                            const input = document.querySelector('input[placeholder="Find or add customer..."]');
+                            if (input) {
+                                input.focus();
+                                input.select();
+                            }
+                        }, 100);
+                    }}
+                    onSalesman={() => {
+                        setActiveTabId('manual');
+                        setStatusMessage({
+                            type: 'success',
+                            text: 'Select the editor/salesman from the order details.',
+                        });
+                    }}
+                    onQuotation={() => {
+                        setStatusMessage({
+                            type: 'error',
+                            text: 'Quotation workflow has not been configured yet.',
+                        });
+                    }}
+                    onSalesReturn={() => {
+                        setStatusMessage({
+                            type: 'error',
+                            text: 'Sales Return workflow has not been configured yet.',
+                        });
+                    }}
+                    onStockUpdate={() => {
+                        setActiveTabId('inventory');
+                        setProductSearchFocusTrigger((current) => current + 1);
+                        setStatusMessage({ type: 'success', text: 'Inventory products opened.' });
+                    }}
+                    onOpenCashDrawer={() => {
+                        setStatusMessage({
+                            type: 'error',
+                            text: 'Cash drawer hardware has not been configured yet.',
+                        });
+                    }}
+                    onExpensePaidOut={() => {
+                        setStatusMessage({
+                            type: 'error',
+                            text: 'Expense / Paid Out workflow has not been configured yet.',
+                        });
+                    }}
+                    onCloseShift={() => {
+                        if (combinedItems.length > 0) {
+                            setStatusMessage({
+                                type: 'error',
+                                text: 'Complete or hold the current transaction before closing the shift.',
+                            });
+                            return;
+                        }
+                        setStatusMessage({
+                            type: 'error',
+                            text: 'Close Shift workflow has not been configured yet.',
+                        });
+                    }}
+                    onLogout={() => {
+                        if (combinedItems.length > 0) {
+                            const continueLogout = window.confirm(
+                                'You have an active transaction. Logout anyway? Unsaved transaction data may be lost.'
+                            );
+                            if (!continueLogout) return;
+                        }
 
-                    onHoldTransaction={() => {
-                        holdCurrentOrder();
-                    }}
+                        const confirmed = window.confirm('Are you sure you want to logout?');
+                        if (!confirmed) return;
 
-                    onLoadTransaction={() => {
-                        setShowHeldOrdersModal(true);
+                        router.post(route('logout'));
                     }}
+                    onLockScreen={() => {
+                        setStatusMessage({
+                            type: 'error',
+                            text: 'Lock Screen has not been configured yet.',
+                        });
+                    }}
+                    onToggleFullscreen={toggleFullscreen}
                 />
-              {/* Header Actions */}
-              <div className="flex flex-col md:flex-row items-center justify-between gap-6 bg-white dark:bg-slate-900 p-6 rounded-[2.5rem] border border-slate-200/60 dark:border-slate-800 shadow-sm shadow-slate-200/20">
-                  <div className="flex items-center gap-5">
-                      <div className="p-3.5 rounded-3xl bg-primary-500/10 text-primary-600 dark:text-primary-400">
-                          <ReceiptText className="w-7 h-7" />
+                {/* Header Actions */}
+                <div className="flex flex-col md:flex-row items-center justify-between gap-6 bg-white dark:bg-slate-900 p-6 rounded-[2.5rem] border border-slate-200/60 dark:border-slate-800 shadow-sm shadow-slate-200/20">
+                    <div className="flex items-center gap-5">
+                        <div className="p-3.5 rounded-3xl bg-primary-500/10 text-primary-600 dark:text-primary-400">
+                            <ReceiptText className="w-7 h-7" />
                         </div>
                         <div>
                             <h1 className="text-2xl font-black text-slate-900 dark:text-white tracking-tight">Transaction</h1>
@@ -1959,7 +2069,7 @@ export default function POSIndex({
                                         </div>
                                     </div>
                                 </div>
-                                
+
                                 <div className="md:col-span-2 space-y-3 mt-2 bg-slate-50 dark:bg-slate-900/30 p-4 rounded-2xl border border-slate-150 dark:border-slate-700/60">
                                     <h4 className="font-extrabold text-indigo-650 dark:text-indigo-300 uppercase tracking-wider text-[10px] border-b border-slate-200 dark:border-slate-800 pb-1">Saved Bill Actions (Print screen)</h4>
                                     <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-1">
@@ -2337,7 +2447,7 @@ export default function POSIndex({
                                             products={products}
                                             categories={categories}
                                             onAddToCart={handleProductSelect}
-                                              focusSearchTrigger={productSearchFocusTrigger}
+                                            focusSearchTrigger={productSearchFocusTrigger}
                                         />
                                     </div>
                                 )}
@@ -2411,6 +2521,7 @@ export default function POSIndex({
                             selectedCustomer={selectedCustomer}
                             selectedCustomerId={selectedCustomerId}
                             changeQtyTrigger={changeQtyTrigger}
+                            changeRateTrigger={changeRateTrigger}
                             onBillDateChange={setBillDate}
                             onCustomerNameChange={setCustomerName}
                             onCustomerPhoneChange={setCustomerPhone}

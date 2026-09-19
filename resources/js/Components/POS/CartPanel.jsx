@@ -30,6 +30,7 @@ export default function CartPanel({
     items = [],
     onUpdateQuantity,
     changeQtyTrigger = 0,
+    changeRateTrigger = 0,
     onUpdateUnitPrice,
     onUpdateDiscountMode,
     onUpdateDiscountValue,
@@ -155,25 +156,44 @@ export default function CartPanel({
         setLocalCreateError(result?.error || 'Failed to create customer.');
     };
     const quantityInputRefs = useRef({});
+    const rateInputRefs = useRef({});
 
-        useEffect(() => {
-            if (changeQtyTrigger <= 0 || items.length === 0) {
-                return;
-            }
+    useEffect(() => {
+        if (changeQtyTrigger <= 0 || items.length === 0) {
+            return;
+        }
 
-            // If there is only one item, focus it automatically.
-            if (items.length === 1) {
-                const input = quantityInputRefs.current[items[0].id];
+        // If there is only one item, focus it automatically.
+        if (items.length === 1) {
+            const input = quantityInputRefs.current[items[0].id];
 
-                input?.focus();
-                input?.select();
+            input?.focus();
+            input?.select();
 
-                input?.scrollIntoView({
-                    behavior: 'smooth',
-                    block: 'center',
-                });
-            }
+            input?.scrollIntoView({
+                behavior: 'smooth',
+                block: 'center',
+            });
+        }
     }, [changeQtyTrigger, items]);
+    useEffect(() => {
+        if (changeRateTrigger <= 0 || items.length === 0) {
+            return;
+        }
+
+        // If there is only one item, focus its rate automatically.
+        if (items.length === 1) {
+            const input = rateInputRefs.current[items[0].id];
+
+            input?.focus();
+            input?.select();
+
+            input?.scrollIntoView({
+                behavior: 'smooth',
+                block: 'center',
+            });
+        }
+    }, [changeRateTrigger]);
 
     return (
         <aside className="w-full flex flex-col h-full bg-white dark:bg-slate-800 rounded-3xl border border-slate-200/60 dark:border-slate-700/50 shadow-sm overflow-hidden">
@@ -359,6 +379,11 @@ export default function CartPanel({
                                             <div className="flex items-center gap-1.5 mt-1">
                                                 <span className="text-[9px] font-bold text-slate-400">LKR</span>
                                                 <input
+                                                    ref={(element) => {
+                                                        if (element) {
+                                                            rateInputRefs.current[item.id] = element;
+                                                        }
+                                                    }}
                                                     type="number"
                                                     min="0"
                                                     step="0.01"

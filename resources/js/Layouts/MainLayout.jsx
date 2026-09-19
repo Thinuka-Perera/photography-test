@@ -19,17 +19,17 @@ import { ThemeProvider } from "@/Contexts/ThemeContext";
  * @param {{ children: React.ReactNode, pageTitle?: string }} props
  * @returns {JSX.Element}
  */
-export default function MainLayout({ children, pageTitle = "Overview" }) {
+export default function MainLayout({ children, pageTitle = "Overview", isSidebarCollapsed = false }) {
     return (
         <ThemeProvider>
             <ShopProvider>
                 <div className="min-h-screen bg-light-bg dark:bg-dark-bg">
-                    <Sidebar />
+                    {!isSidebarCollapsed && <Sidebar />}
 
-                    <div className="ml-64">
-                        <Navbar pageTitle={pageTitle} />
+                    <div className={isSidebarCollapsed ? "w-full" : "ml-64"}>
+                        {!isSidebarCollapsed && <Navbar pageTitle={pageTitle} />}
 
-                        <main className="p-6">{children}</main>
+                        <main className={isSidebarCollapsed ? "p-2" : "p-6"}>{children}</main>
                     </div>
 
                     {/* Global Toast notifications — reads flash messages from Inertia shared props */}
